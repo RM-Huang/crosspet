@@ -24,6 +24,9 @@ BIG_JOB_TOOLS = 8  # 一轮里用了这么多次工具，结束时「得意」�
 
 character = sys.argv[1] if len(sys.argv) > 1 else "claude"
 default_data = Path(os.environ.get("CROSSPET_DATA_DIR") or str(Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData/Local"))) / "CrossPet"))
+if sys.platform == "linux":
+    default_data = Path(os.environ.get("CROSSPET_DATA_DIR") or str(
+        Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "crosspet"))
 state_dir = Path(os.environ.get("CROSSPET_STATE_DIR") or (str(default_data / "state") if os.name == "nt" else "/tmp/crosspet"))
 
 # 跟着 AI 出现：开始干活（会话开始 / 发消息 / 调模型）时桌宠没开着就把它打开。
@@ -98,6 +101,26 @@ def app_started_at():
                 break
             pid, start, path = parent, parent_start, parent_path
         return start, path.rsplit("\\", 1)[-1]
+    if sys.platform == "linux":
+        # ps 的 etime 只有整秒，刚退出又收到钩子时会把旧进程误判为新启动。
+        # /proc 的 starttime 是开机后的时钟 tick，保留亚秒精度。
+        boot = next(float(line.split()[1]) for line in Path("/proc/stat").read_text().splitlines() if line.startswith("btime "))
+        ticks = os.sysconf("SC_CLK_TCK")
+        def proc(pid):
+            raw = Path(f"/proc/{pid}/stat").read_text()
+            fields = raw[raw.rfind(")") + 2:].split()
+            return int(fields[1]), boot + int(fields[19]) / ticks, raw[raw.find("(")+1:raw.rfind(")")]
+        pid = os.getpid()
+        parent, started, name = proc(pid)
+        while parent > 1:
+            try:
+                next_parent, next_start, next_name = proc(parent)
+            except (OSError, ValueError):
+                break
+            if next_name in ("systemd", "init", "gnome-session-b"):
+                break
+            parent, started, name = next_parent, next_start, next_name
+        return started, name
     import subprocess
     out = subprocess.run(["/bin/ps", "-A", "-o", "pid=,ppid=,etime=,comm="], capture_output=True, text=True, timeout=5).stdout
     procs = {}
@@ -120,7 +143,7 @@ def app_started_at():
 
 def ensure_pet() -> str:
     """返回这次的结果（写进 <状态目录>/autostart.txt，排查「为什么没出来」用）"""
-    data = default_data if os.name == "nt" else Path.home() / "Library/Application Support/CrossPet"
+    data = default_data if os.name == "nt" or sys.platform == "linux" else Path.home() / "Library/Application Support/CrossPet"
     quit_flag = data / "user-quit"
     if quit_flag.exists():
         quit_at = quit_flag.stat().st_mtime
@@ -160,6 +183,25 @@ def ensure_pet() -> str:
             subprocess.Popen([str(explorer), str(exe)], creationflags=detached, **quiet)
             return fresh_note + "已打开（由资源管理器打开）"
         return fresh_note + "已打开"
+    elif sys.platform == "linux":
+        import fcntl
+        # 锁而不是单看 PID：重启后的 PID 重用不能让桌宠永远无法再启动。
+        data.mkdir(parents=True, exist_ok=True)
+        with (data / "instance.lock").open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return "已经在跑"
+        try:
+            launch = json.loads((data / "launch.json").read_text())
+            argv = launch["argv"]
+            if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
+                return "不打开：Linux 启动配置格式错误"
+            env = dict(os.environ, CROSSPET_DATA_DIR=str(data), CROSSPET_STATE_DIR=str(state_dir))
+            subprocess.Popen(argv, env=env, start_new_session=True, **quiet)
+            return fresh_note + "已打开"
+        except FileNotFoundError:
+            return "不打开：请先安装或从源码启动 Linux 版 CrossPet"
     else:
         try:
             os.kill(int((state_dir / "pet.pid").read_text().strip()), 0)
@@ -305,7 +347,7 @@ if character == "gpt" and "transcript_path" in event:
 MULTI_MODEL_HOSTS = ("workbuddy", "zcode", "hermes")
 # ZCode 默认用智谱的 GLM；它只在会话开始时告诉模型名，之后的事件按会话 id 查当时记下的模型
 HOST_DEFAULT_MODEL = {"zcode": "glm"}
-characters_dir = (default_data if os.name == "nt" else Path.home() / "Library/Application Support/CrossPet") / "characters"
+characters_dir = (default_data if os.name == "nt" or sys.platform == "linux" else Path.home() / "Library/Application Support/CrossPet") / "characters"
 
 
 def character_for_model(model: str):
