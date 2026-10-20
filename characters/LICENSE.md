@@ -17,12 +17,15 @@
 |---|---|
 | DeepSeek | 原型「溟月」：**上善无形**（2025-06，CC BY-NC-SA 4.0）；深蓝女仆鲸鱼娘（「大肥鱼」）：B 站 **ZipZipPipe** |
 | GPT | 「御姐白龙」：B 站 **ZipZipPipe** |
+| GLM | 黑狐狸女仆：B 站 **ZipZipPipe**（「心机涨价狐」的性格和专属动作是 CrossPet 的二创） |
+| 千问 | 国风千金：B 站 **ZipZipPipe**（「温柔大方的千金」的性格和专属动作是 CrossPet 的二创） |
+| 彩蛋（DeepSeek 把活外包给千问） | CrossPet 原创情节，基于以上角色 |
 | Gemini | 社区流行的 Gemini 娘设定（猫耳、异色瞳、四芒星发饰） |
 | Claude | 社区流行的 Claude 娘设定（铜橙色长发、橙花发饰、书） |
 | 彩蛋（DeepSeek cos Claude / GPT） | CrossPet 原创情节，基于以上角色 |
 
 参考资料：[萌娘百科 DeepSeek 娘](https://zh.moegirl.org.cn/DeepSeek%E5%A8%98)、[ai-school-op](https://github.com/lshhhhhhh/ai-school-op)、[openpet-ai-girls](https://github.com/AwesomeHou/openpet-ai-girls)。
 
-「Claude」「GPT」「ChatGPT」「Codex」「DeepSeek」「Gemini」是各自公司的商标，本项目为非官方同人项目，与这些公司无关。
+「Claude」「GPT」「ChatGPT」「Codex」「DeepSeek」「Gemini」「GLM」「Qwen」「千问」是各自公司的商标，本项目为非官方同人项目，与这些公司无关。
 
 如果你是原作者并且对使用方式有异议，请在 GitHub 提 Issue，我们会第一时间修改或移除。

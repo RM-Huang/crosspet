@@ -89,8 +89,8 @@ namespace CrossPet
         {
             if (Window == null || hwnd == IntPtr.Zero) return;
             if (userHidden) return;   // 你用快捷键藏起来了：什么都别把她翻出来
-            // 全屏时隐藏
-            var hide = HideFullscreen && !fullscreenOverride && Native.InFullscreen(hwnd);
+            // 全屏时隐藏；全屏的是 AI 程序（对照表里有的，专心和 AI 干活）照常显示，和 macOS 一致
+            var hide = HideFullscreen && !fullscreenOverride && !frontIsAI && Native.InFullscreen(hwnd);
             if (hide != hiddenForFullscreen)
             {
                 hiddenForFullscreen = hide;

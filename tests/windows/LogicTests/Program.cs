@@ -70,6 +70,42 @@ static class Program
         Check("网页大小：两次都偏小且一致才记", ZoomCheck.Off(260, 362, 208, 289.6, 208, 289.6));
         Check("网页大小：两次量的不一样（还在变）不记", !ZoomCheck.Off(488, 477, 594, 531, 415, 408));
         Check("网页大小：量到的数不对劲（0 或负）不记", !ZoomCheck.Off(260, 362, 0, 0, 0, 0));
+        // 系统缩放被算了两遍（反馈：125%、WebView2 155，网页 224×298 应为 280×372）：按偏差把网页缩放调回来；别的偏差不动
+        bool Near(double? v, double want) => v.HasValue && Math.Abs(v.Value - want) < 0.005;
+        Check("缩放修正：偏差正好是系统缩放 → 修正 0.8", Near(ZoomCheck.Fix(280, 372, 224, 298, 1.25, 1), 0.8));
+        Check("缩放修正：150% 时偏差 1/1.5 → 修正 0.667", Near(ZoomCheck.Fix(280, 372, 186.7, 248, 1.5, 1), 0.667));
+        Check("缩放修正：对得上不修", ZoomCheck.Fix(280, 372, 280, 372, 1.25, 1) == null);
+        Check("缩放修正：宽高偏得不一样（拖滑块半路）不修", ZoomCheck.Fix(488, 477, 594, 531, 1.25, 1) == null);
+        Check("缩放修正：100% 时偏小 0.8 不像算两遍，不修", ZoomCheck.Fix(280, 372, 224, 298, 1.0, 1) == null);
+        Check("缩放修正：修过以后又好了（偏大回去）→ 撤销成 1", Near(ZoomCheck.Fix(280, 372, 350, 465, 1.25, 0.8), 1));
+        Check("缩放修正：量到的数不对劲不修", ZoomCheck.Fix(280, 372, 0, 0, 1.25, 1) == null);
+
+        // 主线程必须是 STA：WPF 和 WebView2 都要求。1.3.7-test 里 [STAThread] 被新加的 InstallComplete 隔开、落到了它头上，
+        // Main 变成 MTA，WebView2 一初始化就报 RPC_E_CHANGED_MODE（「无法在设置线程模式后对其加以更改」），桌宠打不开
+        string FindUp(string rel) { for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent) { var f = Path.Combine(d.FullName, rel); if (File.Exists(f)) return f; } return null; }
+        var programCs = FindUp(Path.Combine("app", "windows", "src", "Program.cs"));
+        Check("启动：找得到 Program.cs", programCs != null);
+        if (programCs != null)
+            Check("启动：[STAThread] 紧挨着 static void Main", System.Text.RegularExpressions.Regex.IsMatch(File.ReadAllText(programCs), @"\[STAThread\]\s*static\s+void\s+Main\s*\("));
+
+        // 安装是否完整（#24：一键更新删到一半，characters、integrations 没了，之后每次启动都崩）
+        var icRoot = Path.Combine(Path.GetTempPath(), "crosspet-installcheck-" + Guid.NewGuid().ToString("N"));
+        string Make(string dir, params string[] parts) { Directory.CreateDirectory(dir); foreach (var x in parts) Directory.CreateDirectory(Path.Combine(dir, x)); return dir; }
+        var full = Make(Path.Combine(icRoot, "full"), "characters", "web", "integrations", "tools", "python");
+        Check("安装检查：齐全的不缺", InstallCheck.Missing(full).Count == 0);
+        var half = Make(Path.Combine(icRoot, "half"), "web", "tools", "python");
+        Check("安装检查：删到一半的列出缺了哪些", string.Join(",", InstallCheck.Missing(half)) == "characters,integrations");
+        Check("安装检查：目录不存在时全缺", InstallCheck.Missing(Path.Combine(icRoot, "nope")).Count == 5);
+        var cache = Path.Combine(icRoot, "CrossPet-update");
+        Check("修复包：没有缓存时找不到", InstallCheck.RepairPackage(cache) == null);
+        var oldPkg = Make(Path.Combine(cache, "v1.3.3", "CrossPet"), "characters", "web", "integrations", "tools", "python");
+        File.WriteAllText(Path.Combine(oldPkg, "install.ps1"), "");
+        var badPkg = Make(Path.Combine(cache, "v1.3.6", "CrossPet"), "web");   // 下载 / 解压没完成的
+        File.WriteAllText(Path.Combine(badPkg, "install.ps1"), "");
+        var newPkg = Make(Path.Combine(cache, "v1.3.4", "CrossPet"), "characters", "web", "integrations", "tools", "python");
+        File.WriteAllText(Path.Combine(newPkg, "install.ps1"), "");
+        Check("修复包：挑版本最新的完整安装包（不完整的跳过）", InstallCheck.RepairPackage(cache) == newPkg);
+        try { Directory.Delete(icRoot, true); } catch { }
 
         Console.WriteLine(fails == 0 ? "全部通过" : $"{fails} 项失败");
         return fails == 0 ? 0 : 1;

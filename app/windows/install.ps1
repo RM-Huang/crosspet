@@ -22,9 +22,42 @@ try {
         Start-Sleep -Milliseconds 500
     }
     if ([IO.Path]::GetFullPath($PSScriptRoot) -ne [IO.Path]::GetFullPath($destination)) {
-        if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force }
-        New-Item -ItemType Directory -Path $destination -Force | Out-Null
-        Copy-Item -Path (Join-Path $PSScriptRoot '*') -Destination $destination -Recurse -Force
+        # 接入的 AI（Codex、DeepSeek Harness……）每次调钩子都会用 Programs\CrossPet\python\python.exe 跑一下 crosspet-hook.py，一两秒就结束。
+        # 它们在跑时这些文件删不掉、目录也改不了名（#24）：先等它们退出，等 10 秒还在就结束掉（只少记一个事件）
+        # 只查会从安装目录里跑起来的几个程序名：读全部进程的路径在 Windows 上一次就要一秒多，按次数算的「10 秒」会拖成半分钟（test.5 实测 37 秒）
+        function OurProcesses { @(Get-Process -Name python, pythonw, CrossPet -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($destination + '\', [StringComparison]::OrdinalIgnoreCase) }) }
+        $deadline = (Get-Date).AddSeconds(10)
+        while ((OurProcesses).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+        $busy = OurProcesses
+        if ($busy.Count -gt 0) { Say "结束占用安装目录的进程：$(($busy | ForEach-Object { $_.Name + ' ' + $_.Id }) -join '，')"; $busy | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }
+
+        # 不原地删（#24：以前先删旧目录再复制，删到一半失败就留下缺了 characters、integrations 的目录，之后每次启动都崩）。
+        # 现在新版先完整复制到 CrossPet.new，再把旧目录改名成 CrossPet.old-时间、新目录改名成 CrossPet，最后删旧的。
+        # 哪一步失败都退得回去：旧目录要么没动过、要么改回原名
+        $parent = Split-Path $destination
+        $staged = "$destination.new"
+        Get-ChildItem -LiteralPath $parent -Directory -Filter 'CrossPet.old-*' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue   # 上次没删掉的旧版本
+        if (Test-Path -LiteralPath $staged) { Remove-Item -LiteralPath $staged -Recurse -Force }
+        New-Item -ItemType Directory -Path $staged -Force | Out-Null
+        Copy-Item -Path (Join-Path $PSScriptRoot '*') -Destination $staged -Recurse -Force
+        foreach ($need in 'CrossPet.exe', 'characters', 'web', 'integrations', 'tools', 'python') {
+            if (-not (Test-Path -LiteralPath (Join-Path $staged $need))) { Remove-Item -LiteralPath $staged -Recurse -Force -ErrorAction SilentlyContinue; throw "新版本复制不完整（缺少 $need），旧版本没有动" }
+        }
+        $old = "$destination.old-" + (Get-Date -Format 'yyyyMMddHHmmss')
+        $hadOld = Test-Path -LiteralPath $destination
+        if ($hadOld) {
+            try { Rename-Item -LiteralPath $destination -NewName (Split-Path $old -Leaf) }
+            catch {
+                Remove-Item -LiteralPath $staged -Recurse -Force -ErrorAction SilentlyContinue
+                throw "旧版本的文件正被别的程序占用，没法替换（$($_.Exception.Message)）。旧版本没有动；请关掉 Codex、DeepSeek Harness 等正在用的 AI 后再更新"
+            }
+        }
+        try { Rename-Item -LiteralPath $staged -NewName (Split-Path $destination -Leaf) }
+        catch {
+            if ($hadOld) { Rename-Item -LiteralPath $old -NewName (Split-Path $destination -Leaf) -ErrorAction SilentlyContinue }   # 换回旧版本
+            throw
+        }
+        if ($hadOld) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue }   # 删不掉（还有文件被占用）就留着，下次安装时再清
     }
     # 去掉「从网上下载的」标记：不然由资源管理器打开（AI 开始工作时自动出现）可能会弹安全警告
     Get-ChildItem -LiteralPath $destination -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
@@ -50,7 +83,13 @@ try {
     Start-Process -FilePath $exe
 } catch {
     Say "安装失败：$_" 'Red'
-    # 一键更新失败时把旧版（如果还在）重新打开
-    if ($Update -and (Test-Path -LiteralPath $exe)) { Start-Process -FilePath $exe }
+    if ($Update) {
+        # 一键更新失败时把旧版（如果还在）重新打开，并且明说没装上——以前只写日志，用户完全不知道
+        if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe }
+        try {
+            Add-Type -AssemblyName PresentationFramework
+            [System.Windows.MessageBox]::Show("更新没装上：$_`n`nCrossPet 还是原来的版本，可以稍后在右键菜单里再点更新。", 'CrossPet') | Out-Null
+        } catch { }
+    }
     exit 1
 }

@@ -84,8 +84,9 @@ namespace CrossPet
                 hit.ReleaseMouseCapture();
                 if (!pressed) return;
                 pressed = false;
-                // 点的位置换成网页坐标（CSS 像素：DIP 除以给网页的缩放）：网页要知道是不是点在「新功能」卡片的按钮上
-                var p = e.GetPosition(hit); var z = Math.Max(web?.ZoomFactor ?? 1, 0.01);
+                // 点的位置换成网页坐标（CSS 像素，和可点区域一样按 窗口宽 / 画布宽 换算；不用 ZoomFactor：缩放被自动修正过时它不等于人物大小）：
+                // 网页要知道是不是点在「新功能」卡片的按钮上
+                var p = e.GetPosition(hit); var z = Math.Max(Window.Width / pageW, 0.01);
                 Js($"handleClick('pat', {Num(Math.Round(p.X / z, 1))}, {Num(Math.Round(p.Y / z, 1))})");
             };
             hit.MouseRightButtonUp += (_, __) =>

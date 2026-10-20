@@ -1,7 +1,7 @@
 # Codex 重置提醒 · 设计
 
 日期：2026-10-14　状态：loki 已同意三部分（10-14），待审阅本文
-来源：issue #16（SkywingJam 的提案和插件侧演示）；呈现方式由 loki 重新设计
+来源：issue #16（@chin190 的提案和插件侧演示）；呈现方式由 loki 重新设计
 
 ## 为什么做
 
@@ -111,7 +111,7 @@ Codex 的额度会被官方（@thsottiaux）不定期重置，用的人常去刷
 - `tests/codex_resets.test.js`：用真实接口形状做样本——全空；只有宣布（有 / 无 `scheduled_for`）；宣布已执行（`latest_reset.id` 相同）；预测各档（85 / 50 / 10 / null）；预测过期；字段类型不对；`forecast_window` 认得 / 认不出；主动说的规则（新的说、说过的不说、elevated 低概率不说、过期不说）
 - 网页：浏览器里用假数据看额度下方那一行、问她各档的动作和台词、主动说只说一次
 - 外壳：两端编译；Mac 实测菜单只在 GPT 时出现；Windows 由 Codex 跑一轮
-- 文档：`docs/架构.md` 文件列表和测试表各补一行；CHANGELOG；README 提一句；issue #16 做好后 @ SkywingJam 帮测
+- 文档：`docs/架构.md` 文件列表和测试表各补一行；CHANGELOG；README 提一句；issue #16 做好后 @chin190 帮测
 
 ## 修订（写计划和实现时）
 

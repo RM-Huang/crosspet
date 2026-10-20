@@ -28,26 +28,36 @@
   // 宣布过、而且已经执行了（站点记为已执行，或我们在宣布之后看到了 Codex 额度重置）
   const doneAnnounced = (d, resetSeenAt) => !!(d?.announced && !liveAnnounced(d, resetSeenAt))
   const liveWatch = (d, now) => (d?.watch && (!d.watch.expires || d.watch.expires > now) ? d.watch : null)
+  // 刚重置过：站点记的最近一次重置在 5 小时内（一个 5 小时额度窗口）。官方常常不提前宣布、直接发「已经重置」（10-20 那次），
+  // 这段时间问她要说「刚重置过」，不能说「没风声」
+  const RECENT_SEC = 5 * 3600
+  const recentReset = (d, now) => (now && d?.latest?.at && now - d.latest.at >= -60 && now - d.latest.at < RECENT_SEC ? d.latest : null)
+  function agoText(sec) {
+    const m = Math.max(1, Math.floor(sec / 60))
+    return m < 60 ? `${m} 分钟前` : `${Math.floor(m / 60)} 小时前`
+  }
 
   const pad = n => String(n).padStart(2, '0')
   function fmt(s) { const t = new Date(s * 1000); return `${pad(t.getMonth() + 1)}/${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}` }
 
-  function notice(d, resetSeenAt) {
+  function notice(d, resetSeenAt, now) {
     const a = liveAnnounced(d, resetSeenAt)
-    if (!a) return ''
-    return a.for ? `🔔 官方已宣布重置 · 预计 ${fmt(a.for)}` : '🔔 官方已宣布重置，还没生效'
+    if (a) return a.for ? `🔔 官方已宣布重置 · 预计 ${fmt(a.for)}` : '🔔 官方已宣布重置，还没生效'
+    const r = recentReset(d, now)
+    return r ? `✨ ${agoText(now - r.at)}刚重置过` : ''
   }
 
+  // forecast_window 翻成中文：next 48h → 接下来 48 小时内；within / in 24h → 24 小时内（站点 10 月起用 within）。
+  // 认不出返回 ''：带 {window} 的台词就不挑了，不把英文硬塞进句子
   function windowText(s) {
-    let m = /^next\s+(\d+)\s*h(?:ours?)?$/i.exec(s || '')
-    if (m) return `接下来 ${m[1]} 小时内`
-    m = /^next\s+(\d+)\s*d(?:ays?)?$/i.exec(s || '')
-    if (m) return `接下来 ${m[1]} 天内`
-    return s || ''
+    const m = /^(next|within|in)\s+(\d+)\s*(h|hrs?|hours?|d|days?)$/i.exec(String(s || '').trim())
+    if (!m) return ''
+    const unit = /^h/i.test(m[3]) ? '小时' : '天'
+    return /^next$/i.test(m[1]) ? `接下来 ${m[2]} ${unit}内` : `${m[2]} ${unit}内`
   }
 
   // 专属立绘（docs/prompts/重置提醒/）；没画的在 index.html 的 POSE_FALLBACK 里退回 reset / happy / hum / sulk
-  const POSE = { announced: 'reset_bell', high: 'reset_hope', mid: 'reset_maybe', low: 'reset_nope', none: 'reset_nope', offline: 'reset_nope' }
+  const POSE = { recent: 'reset', announced: 'reset_bell', high: 'reset_hope', mid: 'reset_maybe', low: 'reset_nope', none: 'reset_nope', offline: 'reset_nope' }
   function tierOf(d, now, resetSeenAt) {
     if (liveAnnounced(d, resetSeenAt)) return 'announced'
     const w = liveWatch(d, now)
@@ -59,6 +69,8 @@
   function answer(d, now, resetSeenAt) {
     if (!d) return { tier: 'offline', pose: POSE.offline, key: 'resetOffline', vars: {} }
     if (doneAnnounced(d, resetSeenAt)) return { tier: 'done', pose: 'reset', key: 'resetDone', vars: {} }   // 不能说「没风声」
+    const r = !liveAnnounced(d, resetSeenAt) && recentReset(d, now)
+    if (r) return { tier: 'recent', pose: POSE.recent, key: 'resetRecent', vars: { ago: agoText(now - r.at) } }
     const tier = tierOf(d, now, resetSeenAt)
     if (tier === 'announced') { const a = liveAnnounced(d, resetSeenAt); return { tier, pose: POSE[tier], key: 'resetAnnounced', vars: { when: a.for ? fmt(a.for) : '很快' } } }
     if (tier === 'none') return d.stats
@@ -66,17 +78,31 @@
       : { tier, pose: POSE.none, key: 'resetQuiet', vars: {} }
     const w = liveWatch(d, now)
     const key = { high: 'resetHigh', mid: 'resetMid', low: 'resetLow' }[tier]
+    const vars = {}
+    if (w.chance !== null) vars.chance = w.chance
     const window = windowText(w.window)
-    return { tier, pose: POSE[tier], key, vars: w.chance !== null ? { chance: w.chance, window } : { window } }
+    if (window) vars.window = window
+    return { tier, pose: POSE[tier], key, vars }
   }
 
   // 主动说：新宣布，或新的强预测（strong 或 ≥70%）；told 是已经说过的 id（宣布 'a:<id>'，预测 'w:<observed_at>'）
   function toAnnounce(d, now, resetSeenAt, told) {
     const a = liveAnnounced(d, resetSeenAt)
     if (a) return told.includes('a:' + a.id) ? null : { id: 'a:' + a.id }
+    const r = recentReset(d, now)
+    if (r && !(resetSeenAt && resetSeenAt >= r.at)) return told.includes('r:' + r.id) ? null : { id: 'r:' + r.id }   // 我们自己已经看到重置、庆祝过了就不说
     const w = liveWatch(d, now)
     if (!w || !(w.level === 'strong' || (w.chance ?? 0) >= 70)) return null
     return told.includes('w:' + w.id) ? null : { id: 'w:' + w.id }
+  }
+
+  // 能用的台词：句子里的 {占位} 在 vars 里都有。角色自己的（own）一句都用不了就退回默认句，再不行就不说话
+  function usableLines(own, key, vars) {
+    const ok = list => (list || []).filter(l => [...String(l).matchAll(/\{(\w+)\}/g)].every(m => m[1] in vars))
+    const mine = ok(own)
+    if (mine.length) return mine
+    const dflt = ok(LINES[key])
+    return dflt.length ? dflt : ['']
   }
 
   const fill = (line, vars) => String(line).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m))
@@ -85,7 +111,8 @@
   const LINES = {
     resetAnnounced: ['官方说了，要重置！预计 {when}。'],
     resetDone: ['官方说的重置已经到了，额度满啦！'],
-    resetHigh: ['这次很有戏：{chance}%，{window}。'],
+    resetRecent: ['刚重置过啦！{ago}，额度满满～', '{ago}刚重置过，放心用！'],
+    resetHigh: ['这次很有戏：{chance}%，{window}。', '这次很有戏：{chance}%！'],
     resetMid: ['有点风声，{chance}% 吧，别太指望。', '有点风声……别太指望。'],
     resetLow: ['有动静，但不太像。'],
     resetNone: ['最近没风声。上次重置是 {since} 天前，平均 {avg} 天一次。'],
@@ -93,7 +120,7 @@
     resetOffline: ['我这会儿连不上那个网站……'],
   }
 
-  const api = { parse, notice, answer, toAnnounce, windowText, fill, fmt, LINES }
+  const api = { parse, notice, answer, toAnnounce, windowText, usableLines, fill, fmt, LINES }
   root.CodexResets = api
   if (typeof module !== 'undefined') module.exports = api
 })(typeof window !== 'undefined' ? window : globalThis)

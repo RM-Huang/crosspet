@@ -102,6 +102,24 @@ html.no-name #caption { display: none; }
 #quota div { white-space: nowrap; }
 #quota.low { color: #c0392b; background: rgba(255,236,236,.92); }
 #quota .notice { color: #6b4a3a; font-weight: 600; }   /* 重置提醒那一行：不跟着额度紧张变红 */
+/* 峰谷时段（设置里选款式）。时间条：一天 24 小时，红 = 高峰、绿 = 空闲，竖线 = 现在（北京时间）；颜色要够深，浅色桌面上也看得清 */
+#quota .peak { padding: calc(2px * var(--k)) 0 0; }
+#quota .peakbar { position: relative; width: calc(150px * var(--k)); height: calc(6px * var(--k)); margin: 0 auto; border-radius: calc(3px * var(--k)); overflow: hidden; background: #7cc493; box-shadow: inset 0 0 0 calc(.5px * var(--k)) rgba(74,36,24,.35); }
+#quota .peakbar i { position: absolute; top: 0; bottom: 0; }
+#quota .peakbar i.peak-on { background: #ec8174; }
+#quota .peakbar i.valley-on { background: #7cc493; }
+#quota .peaknow { position: absolute; top: calc(-1px * var(--k)); width: calc(150px * var(--k)); left: 50%; margin-left: calc(-75px * var(--k)); height: calc(8px * var(--k)); pointer-events: none; }
+#quota .peaknow b { position: absolute; top: 0; bottom: 0; width: calc(2px * var(--k)); margin-left: calc(-1px * var(--k)); background: #3a2219; border-radius: 1px; box-shadow: 0 0 0 calc(1px * var(--k)) #fff; }
+#quota .peakwrap { position: relative; }
+#quota .peakticks { position: relative; width: calc(150px * var(--k)); height: calc(11px * var(--k)); margin: 0 auto; font-size: calc(8px * var(--k)); color: #6b4a3a; }
+#quota .peakticks span { position: absolute; top: 0; transform: translateX(-50%); }
+#quota .peakticks span:first-child { transform: none; }
+#quota .peakticks span:last-child { transform: translateX(-100%); }
+/* 文字款：一行「● 高峰」或「● 空闲」 */
+#quota .peaktext { font-weight: 600; }
+#quota .peaktext.peak-on { color: #dc5f51; }
+#quota .peaktext.valley-on { color: #4aa265; }
+#quota .peaktext::before { content: ''; display: inline-block; width: calc(7px * var(--k)); height: calc(7px * var(--k)); margin-right: calc(4px * var(--k)); border-radius: 50%; background: currentColor; vertical-align: calc(.5px * var(--k)); }
 /* 额度合并显示：一家 AI 一行，名字一列、每个额度窗口一列（quota-aggregate.js），只有紧张的百分比变红 */
 #quota.agg:not(:empty) { display: grid; justify-content: center; text-align: left; font-variant-numeric: tabular-nums; }
 #quota .qn { white-space: nowrap; padding-right: calc(7px * var(--k)); font-weight: 600; }
@@ -179,6 +197,7 @@ addEventListener('error', e => { if (e.target && e.target.tagName === 'IMG' && e
 <script src="stand-in.js"></script>
 <script src="codex-resets.js"></script>
 <script src="whats-new.js"></script>
+<script src="peak-hours.js"></script>
 <script>
 // CrossPet 画面：由 CrossPet.app（Swift 外壳）调用这几个函数
 //   init(manifest)          角色清单（characters/*/character.json + 立绘）
@@ -186,6 +205,8 @@ addEventListener('error', e => { if (e.target && e.target.tagName === 'IMG' && e
 //   applyCharState(id, s)   某个 AI 的工作状态（各接入写的 <id>-state.json）
 //   setQuota(id, q)         某个 AI 的额度 / 余额（<id>-quota.json；GPT 走 setCodexQuota，问 Codex 服务）
 //   setQuotaAggregate(on)   额度小窗合并显示各家 AI 的额度（设置里的开关，默认关）
+//   setPeakStyle(s)         额度栏怎么显示峰谷时段：'bar' 时间条（默认）/ 'text' 一行文字 / 'off'（只对 peak-hours.js 里有规则的角色）
+//   setPeakSkins(map)       按时段换衣服的设置 { 角色: { peak: 皮肤, valley: 皮肤 } }（'' = 原版，没写 = 不换）
 //   handleClick(kind)       单击 = pat（摸摸头），右键菜单「戳一下」= poke
 //   playEgg(force)          彩蛋
 
@@ -208,6 +229,7 @@ const MOTION = {
 const LOCAL_LINES = {
   idle: ['……', '在呢'], pat: ['嘿嘿', '（蹭蹭）'], surprised: ['诶？！'], hum: ['♪～'], stretch: ['伸个懒腰～'],
   yawn: ['哈啊……'], sleeping: ['zZz'], tired: ['有点累了…'],
+  peakStart: ['高峰到了，换身衣服干活～'], valleyStart: ['空闲时段，半价啦～换身轻松的'],   // 按时段换衣服（皮肤可以自己写）
 }
 Object.assign(LOCAL_LINES, CodexResets.LINES)   // 重置提醒的默认台词（角色自己写了同名键就用角色的）
 // 新加的姿态还没画立绘时，先用哪张顶上
@@ -410,15 +432,9 @@ function resetsTold(add) {
   if (add) { list = [...list.filter(x => x !== add), add].slice(-50); try { localStorage.setItem('crosspet-resets-told', JSON.stringify(list)) } catch {} }
   return list
 }
-// 挑一句台词填空；没给概率时只挑不含 {chance} 的句子（都含就退回默认台词里不含的）
+// 挑一句台词填空：句子里用到的数据（概率、窗口……）这次没有，就只挑不含它的句子（角色的都不行就退回默认句，见 usableLines）
 function pickLine(key, vars) {
-  let list = linesOf(key) || ['']
-  if (!('chance' in vars)) {
-    const ok = list.filter(l => !l.includes('{chance}'))
-    list = ok.length ? ok : (CodexResets.LINES[key] || ['']).filter(l => !l.includes('{chance}'))
-    if (!list.length) list = ['']
-  }
-  return CodexResets.fill(pick(list), vars)
+  return CodexResets.fill(pick(CodexResets.usableLines(linesOf(key), key, vars)), vars)
 }
 // data：按哪份数据回答（null = 连不上那个网站）
 function tellReset(data = resetsData) {
@@ -480,14 +496,124 @@ function devResetsDone() {
 // 额度下方那一行（只在官方宣布、还没执行时有）
 function appendResetNotice(el) {
   if (!resetsOn || charId !== 'gpt') return
-  const t = CodexResets.notice(resetsData, codexResetSeenAt)
+  const t = CodexResets.notice(resetsData, codexResetSeenAt, Date.now() / 1000)
   if (!t) return
   const line = document.createElement('div')
   line.className = 'notice'
   line.textContent = t
-  if (el.className === 'agg') line.style.gridColumn = '1 / -1'   // 合并显示时是表格：这一行横跨整张表，放在最下面
+  if (el.classList.contains('agg')) line.style.gridColumn = '1 / -1'   // 合并显示时是表格：这一行横跨整张表，放在最下面
   el.appendChild(line)
 }
+// ---- 峰谷时段（peak-hours.js）：额度栏下面画今天的时间条，或者一行文字；按时段换衣服见 checkPeakOutfits ----
+let peakStyle = 'bar', devPeakShift = 0
+const peakNow = () => Date.now() + devPeakShift   // 开发者控制台「峰谷换装」场景会把时间挪到切换点前
+function setPeakStyle(s) { peakStyle = ['bar', 'text', 'off'].includes(s) ? s : 'bar'; renderQuota() }
+function appendPeakBar(el) {
+  const rule = peakStyle !== 'off' && window.PeakHours?.RULES[charId]
+  if (!rule) return
+  const now = peakNow(), pct = m => `${(m / 1440 * 100).toFixed(3)}%`
+  if (peakStyle === 'text') {
+    const st = PeakHours.statusText(rule, now), line = document.createElement('div')
+    line.className = `peaktext ${st.kind}-on`; line.textContent = st.text; line.title = rule.label
+    if (el.classList.contains('agg')) line.style.gridColumn = '1 / -1'
+    el.appendChild(line)
+    const k = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--k')) || 1
+    if ($('foot').offsetHeight > 62 * Math.max(1, k) + 0.5) line.remove()   // 底栏高度预算，同下面时间条
+    return
+  }
+  const box = document.createElement('div')
+  box.className = 'peak'
+  const wrap = document.createElement('div'); wrap.className = 'peakwrap'
+  const bar = document.createElement('div'); bar.className = 'peakbar'
+  for (const s of PeakHours.segments(rule, now)) {
+    const i = document.createElement('i'); i.className = `${s.kind}-on`
+    i.style.left = pct(s.from); i.style.width = pct(s.to - s.from); bar.appendChild(i)
+  }
+  const mark = document.createElement('div'); mark.className = 'peaknow'
+  const b = document.createElement('b'); b.style.left = pct(PeakHours.nowMinute(now)); mark.appendChild(b)
+  wrap.append(bar, mark)
+  const ticks = document.createElement('div'); ticks.className = 'peakticks'
+  for (const h of PeakHours.ticks(rule)) { const t = document.createElement('span'); t.textContent = h; t.style.left = pct(h * 60); ticks.appendChild(t) }
+  box.title = rule.label
+  box.append(wrap, ticks)
+  if (el.classList.contains('agg')) box.style.gridColumn = '1 / -1'   // 合并显示时横跨整张表，放在最下面
+  el.appendChild(box)
+  // 底栏（#foot）有高度预算，超了人物会被顶上去：放不下先去掉刻度，还放不下（合并显示四家、多行额度）就不画
+  const k = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--k')) || 1
+  const over = () => $('foot').offsetHeight > 62 * Math.max(1, k) + 0.5
+  if (over()) ticks.remove()
+  if (over()) box.remove()
+}
+// 每分钟（对齐到整分）挪一次时间条上的竖线；按时段换衣服也在这里看
+let peakTimer = null
+function peakTick() {
+  clearTimeout(peakTimer)
+  peakTimer = setTimeout(peakTick, 60e3 - peakNow() % 60e3 + 50)
+  if (window.PeakHours?.RULES[charId]) renderQuota()
+  checkPeakOutfits()
+}
+
+// ---- 按时段换衣服（设置里「高峰穿 / 空闲穿」）----
+// 进入新的一段（高峰 ↔ 空闲）时按设置换；同一段里你手动换的不换回去（记号存在本机）。
+// 正在显示她：闲着才换——外壳换好立绘调 refreshLook，那里冒一团烟换上，再说一句换装台词；忙着就等下一分钟再看。
+// 没在显示她：悄悄换好。启动时进入了新的一段：换好，不演不说
+let peakSkins = null, outfitLine = null, outfitSayTimer = null, devPeakApplied = null
+const peakPend = {}   // 忙着没换成的：{ 角色: { key, skin: 挂起时她穿的 } }——挂起期间你手动换了，这一段就听你的
+function peakApplied(id, key) {
+  if (devPeakApplied) { if (key !== undefined) devPeakApplied[id] = key; return devPeakApplied[id] ?? null }   // 开发者控制台演的记在内存里，不动真的记号
+  let m = {}
+  try { m = JSON.parse(localStorage.getItem('crosspet-peak-applied')) || {} } catch {}
+  if (key !== undefined) { m[id] = key; try { localStorage.setItem('crosspet-peak-applied', JSON.stringify(m)) } catch {} }
+  return m[id] ?? null
+}
+// 外壳在网页加载完、设置变化时调。改设置不马上换：先把每个角色记成「这一段已经处理过」，等下一段
+function setPeakSkins(map) {
+  const startup = peakSkins === null
+  peakSkins = map && typeof map === 'object' ? map : {}
+  if (!startup) for (const id of Object.keys(PeakHours.RULES)) peakApplied(id, PeakHours.decide(PeakHours.RULES[id], peakNow(), null, null).key)
+  // 启动时等角色恢复好（setCharacter 要 0.33 秒才定下来）再看：太早发 wear，外壳重推 init 时网页以为还没有角色、换成了第一个
+  if (startup) setTimeout(() => checkPeakOutfits(true), 1500); else checkPeakOutfits()
+}
+function peakBusy() {
+  return !!(egg || multi || updatingNow || farewellLine !== null || tucked || aiActivity() || !$('bubble').classList.contains('hide'))
+}
+function checkPeakOutfits(startup) {
+  if (!peakSkins || !window.PeakHours) return
+  for (const [id, rule] of Object.entries(PeakHours.RULES)) {
+    const c = manifest.characters[id]
+    if (!c) continue
+    const d = PeakHours.decide(rule, peakNow(), peakSkins[id], peakApplied(id))
+    if (d.skin === null) { if (d.key !== peakApplied(id)) peakApplied(id, d.key); continue }   // 这一段没设要穿什么
+    if ((c.skin || '') === d.skin) { peakApplied(id, d.key); continue }   // 已经穿着了
+    const showing = id === charId && !startup
+    const pend = peakPend[id]
+    if (pend?.key === d.key && (c.skin || '') !== pend.skin) { delete peakPend[id]; peakApplied(id, d.key); continue }   // 等的时候你手动换了
+    if (showing && peakBusy()) { if (pend?.key !== d.key) peakPend[id] = { key: d.key, skin: c.skin || '' }; continue }   // 忙着：下一分钟再看（那时时段变了就按新的）
+    delete peakPend[id]
+    peakApplied(id, d.key)
+    if (showing) { outfitLine = { id, skin: d.skin, key: d.kind === 'peak' ? 'peakStart' : 'valleyStart', at: Date.now() } }
+    toShell({ wear: { id, skin: d.skin } })
+  }
+}
+peakTick()
+// 开发者控制台「峰谷换装」场景：把时间挪到 at（毫秒时间戳，切换点前几秒），用真实的「高峰穿 / 空闲穿」设置演；
+// 记号放内存（不动真的），devPeakDone 恢复时间、换回原来的衣服
+let devPeakSaved = null
+function devPeakPlay(at) {
+  if (!devPeakSaved) devPeakSaved = { id: charId, worn: manifest.characters[charId]?.skin || '' }
+  devPeakApplied = devPeakApplied || {}
+  devPeakShift = at - Date.now()
+  if (PeakHours.RULES[charId]) devPeakApplied[charId] = PeakHours.decide(PeakHours.RULES[charId], peakNow(), null, null).key   // 当前这一段算处理过，等切换点
+  peakTick()
+}
+function devPeakDone() {
+  if (!devPeakSaved) return
+  const { id, worn } = devPeakSaved
+  devPeakSaved = null; devPeakShift = 0; devPeakApplied = null
+  if ((manifest.characters[id]?.skin || '') !== worn) toShell({ wear: { id, skin: worn } })
+  peakTick()
+}
+
 // 额度聚合（设置里「合并显示各家额度」，默认关）：小窗把各家 AI 的额度排成几行，前面标名字；
 // 关着时只显示当前角色自己的额度。外壳在设置变化 / 启动时调 setQuotaAggregate
 let quotaAggregate = false
@@ -504,6 +630,7 @@ function renderQuota() {
     if (!quotaAggregate) ids = StandIn.quotaIds(reactTo, charId, ids)
     QuotaAggregate.render(el, QuotaAggregate.rows(quota, charId, ids, id => manifest?.characters?.[id]?.name || id))
     appendResetNotice(el)
+    appendPeakBar(el)
     return
   }
   // 多个额度窗口 / 额度池用「｜」隔开，每个占一行，不在半中间折行
@@ -513,6 +640,7 @@ function renderQuota() {
   }))
   el.className = q?.low ? 'low' : ''
   appendResetNotice(el)
+  appendPeakBar(el)
 }
 // 临时动作（打招呼、开心、被摸头……）演完回到哪：AI 还在干活 / 等你回答就回到那个样子，
 // 不然一条要跑好几分钟的命令中途她演了个招呼，之后一直没有新事件，就会站着不动
@@ -569,6 +697,10 @@ function greetDue(id) {
 function setCharacter(id, quiet) {
   if (egg) { clearEggTimers(); egg = null; charId = null }
   if (!manifest.characters[id] || manifest.characters[id].egg || id === charId) return
+  // 上一个角色还没跑完的定时动作（听完转思考、工具结束回思考、排队等着换的动作、演完回待机）全部作废：
+  // 不然会落到换上来的角色身上——她明明闲着，却突然开始思考 / 写东西（PR #26 @KQYaili 报的「串台」）
+  const dropTimers = () => { clearTimeout(thinkTimer); clearTimeout(pending); clearTimeout(revertTimer); clearTimeout(stuckTimer) }
+  dropTimers()
   if (multi) { const m = multi; multi = null; clearInterval(m.flipTimer); clearTimeout(m.recheck); clearTimeout(m.chatter); clearTimeout(m.sayTimer); for (const c of m.cards.values()) c.el.remove(); $('more').classList.remove('on') }
   setTimeout(refreshMulti, 700)   // 换过去的角色如果也有好几个对话在干活，接着演
   setTimeout(preloadEdges, 900)
@@ -576,6 +708,7 @@ function setCharacter(id, quiet) {
   const p = $('poof'); p.classList.remove('go'); void p.offsetWidth; p.classList.add('go')
   stage.classList.add('swap')
   setTimeout(() => {
+    dropTimers()   // 冒烟这 0.33 秒里，上一个角色的事件可能又排了新的
     charId = id; pose = null; currentUrl = ''
     const c = char()
     applyLook(c)
@@ -584,6 +717,8 @@ function setCharacter(id, quiet) {
     const s = charState[id]
     const busy = s && Date.now() / 1000 - s.ts < 60 && !TRANSIENT[s.pose] && s.pose !== 'idle'
     setPose(busy ? s.pose : restPose(), true)
+    if (busy) watchStuck()   // 接着演她自己的活：卡住兜底按她自己的时间重新算
+    if (busy && s.pose === 'listening') thinkTimer = setTimeout(() => { if (charId === id) show('thinking') }, LISTEN_TO_THINKING)
     // 这个时段 / 节日还没打过招呼：演专属的登场动作；打过了就用平常那句（30 分钟冷却）
     if (quiet) say('')
     else if (!timeGreet(id, busy)) say(greetDue(id) ? (c.greeting || `${c.name} 在这儿～`) : '')
@@ -700,6 +835,9 @@ function setTucked(side, peek = false) {
   if (side === tucked && !!peek === tuckedPeek) return
   // 「新功能」卡片开着时缩回边上：卡片挂在屏幕边、点不到——先收起，等她再出来、闲着的时候重新弹
   if (side && !$('newsCard').classList.contains('hidden')) { hideNews(); queueNews(newsShown, 20000) }
+  // 演彩蛋时被拖到边上：彩蛋直接收场、换回原角色再缩进去——彩蛋角色没有贴边立绘，缩着又演不了下一步，
+  // 会一直停在那张图上直到超时；外壳这时量到的切口也是彩蛋的，记在原角色名下，之后贴边位置一直偏
+  if (side && egg) quitEggNow()
   const was = tucked, edge = side || was
   preloadEdges()
   const before = shownRect()
@@ -814,9 +952,16 @@ function configHealed() {
 
 // 换了衣服（皮肤）：外壳重新 init 过立绘清单后调它，正在显示的就是这个角色就重新换上
 function refreshLook(id) {
+  const ol = outfitLine; outfitLine = null
   if (charId !== id || egg) return
   charId = null; preloaded = null
   setCharacter(id, true)
+  // 按时段换的衣服：换好（setCharacter 里冒烟、换图约 0.4 秒）再说换装台词——台词按换上之后的衣服取；
+  // 换上的不是要的那件（外壳没换成、这期间你手动换了别的）就不说
+  if (ol?.id === id && Date.now() - ol.at < 8000 && (manifest.characters[id]?.skin || '') === ol.skin) {
+    const key = ol.key
+    setTimeout(() => { if (charId === id && !egg) { const line = pick(linesOf(key) || ['']); say(line); clearTimeout(outfitSayTimer); outfitSayTimer = setTimeout(() => { if ($('bubble').textContent === line) say('') }, 6000) } }, 700)
+  }
 }
 
 function setName(id, name) {
@@ -1403,15 +1548,16 @@ function eggStep(step) {
   document.documentElement.style.setProperty('--aura', char().aura || '#bcd4ff')
 }
 function playEgg(force) {
-  if (egg || !charId || char()?.egg) return false
+  if (egg || tucked || !charId || char()?.egg) return false   // 缩在边上不演：彩蛋角色没有贴边立绘
   const eggId = eggFor(charId)
   if (!eggId) return false
   if (!force && pose !== 'idle') return false
   const host = charId
-  egg = { host, timers: [], waiting: false }
+  const mine = egg = { host, timers: [], waiting: false }
   hideNews()   // 演彩蛋时「新功能」卡片收起
   clearTimeout(revertTimer); clearTimeout(pending)
   poof(() => {
+    if (egg !== mine) return   // 烟还没散就被收场了（比如刚冒出来就被拖到边上）
     charId = eggId; pose = null; currentUrl = ''
     const c = char()
     document.documentElement.style.setProperty('--accent', c.accent || '#e0b48a')
@@ -1442,6 +1588,20 @@ function leaveEgg(line, step = 'bye') {
   clearEggTimers()
   eggStep(step); say(line)
   egg.timers.push(setTimeout(() => endEgg(), EGG_BYE_MS))
+}
+// 立刻收场，不演 bye、不冒烟：被拖到边上时用
+function quitEggNow() {
+  if (!egg) return
+  const host = egg.host
+  clearEggTimers()
+  egg = null
+  charId = host; pose = null; currentUrl = ''
+  const c = char()
+  applyLook(c)
+  $('blink').src = c.blink || ''
+  $('caption').textContent = c.name
+  say('')
+  renderQuota()
 }
 function endEgg() {
   if (!egg) return

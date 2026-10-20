@@ -142,7 +142,14 @@ def prepare(src: str, character: str, name: str) -> Path:
             n += 1
         if n:
             im = im.crop((n, 0, im.width, im.height) if skip == "left" else (0, 0, im.width - n, im.height))
-    mask, labels, keep, main = drop_debris(background_mask(im))
+    # 生图 AI 直接给透明底时用图自己的 alpha，别拿白底那套去抠：透明 PNG 的底色 RGB 往往是黑的，
+    # 白底洪水填充抠不掉它，会留下一整块不透明的底板。两条路后面走同一段（去碎片、对齐地面、柔化边缘）
+    alpha = np.array(im.getchannel("A"))
+    transparent = (alpha < 250).mean() > 0.05
+    if transparent:
+        mask, labels, keep, main = drop_debris(im.getchannel("A").point(lambda v: 255 if v >= 16 else 0))
+    else:
+        mask, labels, keep, main = drop_debris(background_mask(im))
     im.putalpha(mask)
     im = ground_helpers(im, labels, keep, main)  # 先挪，再柔化边缘，免得原位置留下一圈看不见的晕边
     im.putalpha(im.getchannel("A").filter(ImageFilter.MinFilter(3)).filter(ImageFilter.GaussianBlur(1)))
@@ -151,7 +158,9 @@ def prepare(src: str, character: str, name: str) -> Path:
     out_dir = CHARACTERS / character
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{name}.webp"
-    if hairgap.available():  # 头发之间被围住的白缝（见 hairgap.py，要先下好模型）
+    if transparent:
+        pass  # 透明底的图头发缝本来就是透明的，再抠只会误伤白色绒毛、帽檐（睡衣 DeepSeek 右探头的帽檐被抠出一个洞）
+    elif hairgap.available():  # 白底图里头发之间被围住的白缝（见 hairgap.py，要先下好模型）
         im = hairgap.clean(im)[0]
     else:
         print("  没有 isnet-anime 模型，跳过抠头发缝（见 tools/hairgap.py）")

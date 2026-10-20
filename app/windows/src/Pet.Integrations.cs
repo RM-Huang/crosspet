@@ -35,6 +35,7 @@ namespace CrossPet
         {
             ["claude-hooks"] = "claude", ["claude-mod"] = "claude-mod", ["codex"] = "gpt", ["deepseek"] = "deepseek", ["gemini"] = "gemini",
             ["antigravity"] = "antigravity", ["workbuddy"] = "workbuddy", ["zcode"] = "zcode", ["hermes"] = "hermes",
+            ["qwen"] = "qwen",
         };
         static Dictionary<string, object> LastSeen => Store.Settings.TryGetValue("seen", out var v) && v is Dictionary<string, object> d ? d : new Dictionary<string, object>();
         static double? SeenAt(string key) => LastSeen.TryGetValue(key, out var v) ? Convert.ToDouble(v) : (double?)null;
@@ -128,6 +129,7 @@ namespace CrossPet
             ("workbuddy", "WorkBuddy", "按当前模型换角色，没有对应角色的模型由当前角色来演"),
             ("zcode", "ZCode（智谱）", "按会话的模型换角色，GLM 角色没装时由当前角色来演"),
             ("hermes", "Hermes Agent", "按当前模型换角色，没有对应角色的模型由当前角色来演；新开的会话生效"),
+            ("qwen", "Qwen Code（阿里）", "按当前模型换角色，没有对应角色的模型由当前角色来演；新开的会话生效"),
         };
 
         public Dictionary<string, object> SettingsState()
@@ -138,7 +140,7 @@ namespace CrossPet
                 ["size"] = Scale, ["textSize"] = TextScale, ["textLinked"] = TextLinked, ["showName"] = ShowName, ["eggs"] = EggsEnabled, ["hideFullscreen"] = HideFullscreen, ["aura"] = AuraMode,
                 ["followApps"] = Store.Flag("followApps"), ["followEvents"] = Store.Flag("followEvents"),
                 ["gptQuota"] = Store.Flag("gptQuota"), ["agyQuota"] = Store.Flag("agyQuota"), ["gptQuotaNote"] = codexNote,
-                ["login"] = LoginEnabled, ["edgeDock"] = EdgeDockEnabled, ["dsQuota"] = DsQuotaEnabled, ["quotaAggregate"] = QuotaAggregate, ["codexResets"] = CodexResets, ["appVersion"] = Store.Version, ["whatsNewSeen"] = Store.Settings.TryGetValue("whatsNewSeen", out var wns) && wns is string ws ? ws : Store.Version, ["powerSave"] = PowerSave,
+                ["login"] = LoginEnabled, ["edgeDock"] = EdgeDockEnabled, ["dsQuota"] = DsQuotaEnabled, ["quotaAggregate"] = QuotaAggregate, ["codexResets"] = CodexResets, ["peakStyle"] = PeakStyle, ["peakSkins"] = PeakSkins, ["appVersion"] = Store.Version, ["whatsNewSeen"] = Store.Settings.TryGetValue("whatsNewSeen", out var wns) && wns is string ws ? ws : Store.Version, ["powerSave"] = PowerSave,
                 ["hideHotkey"] = HideHotkey, ["hotkeyFailed"] = hotkeyFailed,
                 ["hotkeys"] = new[] { new Dictionary<string, object> { ["id"] = "off", ["label"] = "不用快捷键" } }.Concat(HotkeyChoices.Select(h => new Dictionary<string, object> { ["id"] = h.id, ["label"] = h.label })).ToList(), ["aiAutostart"] = AIAutostart, ["character"] = current, ["updating"] = updating,
                 ["characters"] = Characters().Select(c =>
@@ -196,6 +198,10 @@ namespace CrossPet
                         case "quotaAggregate": Store.Settings["quotaAggregate"] = on; Store.SaveSettings(); Js($"setQuotaAggregate({(on ? "true" : "false")})"); break;
                         case "whatsNewSeen": if (value is string seen) { Store.Settings["whatsNewSeen"] = seen; Store.SaveSettings(); } break;   // 打开了「新功能」页：小红点消失
                         case "codexResets": Store.Settings["codexResets"] = on; Store.SaveSettings(); Js($"setCodexResets({(on ? "true" : "false")})"); break;
+                        case "peakSkins": Store.Settings["peakSkins"] = CleanPeakSkins(value); Store.SaveSettings(); Js($"setPeakSkins({Store.Json.Serialize(PeakSkins)})"); break;
+                        case "peakStyle":
+                            if (value is string ps && (ps == "bar" || ps == "text" || ps == "off")) { Store.Settings["peakStyle"] = ps; Store.SaveSettings(); Js($"setPeakStyle({Q(ps)})"); }
+                            break;
                         case "powerSave": Store.Settings["powerSave"] = on; Store.SaveSettings(); Js($"setPowerSave({(on ? "true" : "false")})"); break;
                         case "eggs": Store.Settings["eggs"] = on; Store.SaveSettings(); Js($"setEggsEnabled({(on ? "true" : "false")})"); break;
                         case "aura":

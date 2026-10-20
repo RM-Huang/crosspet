@@ -19,6 +19,8 @@ extension App {
     var textLinked: Bool { defaults.object(forKey: "textLinked") as? Bool ?? true }
     var showName: Bool { defaults.object(forKey: "showName") as? Bool ?? true }
     var followApps: Bool { defaults.object(forKey: "followApps") as? Bool ?? true }
+    // 跟随 AI 工作事件（#23 给 macOS 补上的）：默认关——macOS 以前没有这个行为，升级后不该突然按事件换角色；Windows 一直默认开
+    var followEvents: Bool { defaults.object(forKey: "followEvents") as? Bool ?? false }
     var eggsEnabled: Bool { defaults.object(forKey: "eggs") as? Bool ?? true }
 
     /// 换大小时窗口锚在哪：
@@ -99,6 +101,11 @@ extension App {
     /// 桌宠页面发来的消息：「新功能」卡片点了「去看看」→ 打开设置停在「新功能」页
     func handlePet(_ body: Any) {
         if let d = body as? [String: Any], let tab = d["openSettings"] as? String { openSettingsAt(tab: tab) }
+        // 按时段换衣服（网页层判断好了时段）：只换这个角色已有的衣服，不切换当前角色
+        if let d = body as? [String: Any], let w = d["wear"] as? [String: Any], let id = w["id"] as? String, let skin = w["skin"] as? String,
+           characterIds.contains(id), skin.isEmpty || skinChoices[id]?.contains(where: { $0.id == skin }) == true {
+            wear(id, skin)
+        }
     }
 
     /// tab：打开后停在哪个标签页（nil = 上次看的那页）；窗口已经开着就切过去
@@ -136,10 +143,10 @@ extension App {
         let names = defaults.dictionary(forKey: "names") as? [String: String] ?? [:]
         var state: [String: Any] = [
             "version": currentVersion, "appVersion": currentVersion, "whatsNewSeen": defaults.string(forKey: "whatsNewSeen") ?? currentVersion, "platform": "mac",
-            "size": Double(petScale), "textSize": textScale, "textLinked": textLinked, "showName": showName, "eggs": eggsEnabled, "hideFullscreen": hideInFullscreen, "aura": auraMode, "followApps": followApps,
+            "size": Double(petScale), "textSize": textScale, "textLinked": textLinked, "showName": showName, "eggs": eggsEnabled, "hideFullscreen": hideInFullscreen, "aura": auraMode, "followApps": followApps, "followEvents": followEvents,
             "gptQuota": defaults.bool(forKey: "gptQuota"), "agyQuota": defaults.bool(forKey: "agyQuota"), "gptQuotaNote": codexNote,
             "login": SMAppService.mainApp.status == .enabled,
-            "edgeDock": edgeDockEnabled, "dsQuota": dsQuotaEnabled, "quotaAggregate": quotaAggregate, "codexResets": codexResets, "powerSave": powerSave,
+            "edgeDock": edgeDockEnabled, "dsQuota": dsQuotaEnabled, "quotaAggregate": quotaAggregate, "codexResets": codexResets, "peakStyle": peakStyle, "peakSkins": peakSkins, "powerSave": powerSave,
             "hideHotkey": hideHotkey, "hotkeyFailed": hotkeyFailed, "hotkeys": [["id": "off", "label": "不用快捷键"]] + Self.hotkeyChoices.map { ["id": $0.id, "label": $0.label] },
             "aiAutostart": aiAutostart,
             "character": currentId ?? characterIds.first ?? "",

@@ -4,6 +4,13 @@
 // 设计见 docs/superpowers/specs/2026-10-16-whats-new-design.md；测试 tests/whats_new.test.js
 ;(function (root) {
   const LIST = [
+    { version: '1.3.7', items: [
+      { icon: '🪭', title: '新角色：Qwen（千问）', text: '温柔大方的富家千金：大活干完请你喝奶茶，额度快用完时掏出金卡，闲着会分小礼物给大家。在 Qwen Code 里用千问模型时自动换成她，也可以在「角色」页手动选。千问桌面客户端没有对外接口，她跟不了它干活。', go: { tab: 'character' } },
+      { icon: '🔌', title: '接入 Qwen Code', text: '阿里的 Qwen Code 命令行也能接了：她会跟着干活做动作。在「接入 AI」页点一下 Qwen Code 就好，新开的会话生效。这项接入还没在真实的 Qwen Code 里完整测过（干活时的事件要登录才能触发），遇到问题欢迎反馈。', go: { tab: 'ai' } },
+      { icon: '⏰', title: '峰谷时段', text: 'DeepSeek、GLM 的额度下面多了一条今天的时间条：红色高峰、绿色空闲，一眼看出现在贵不贵（嫌看不清可以换成一行文字）。还能选高峰、空闲各穿哪件衣服，到点她自己换。', go: { tab: 'quota', key: 'peakStyle' } },
+      { icon: '🐳', title: 'DeepSeek 新衣服：睡衣、冬装', text: '两套新皮肤：云朵睡衣（更困、更想躺）和鲸鱼兜帽冬装（怕冷、惦记热乎乎的白饭）。在「角色」页换上；也可以让她空闲时段自动换上睡衣。两套衣服各藏着一个彩蛋：深夜偷穿睡衣的「圣女」Claude，和雪人里的狐狸。', go: { tab: 'character' } },
+      { icon: '😴', title: '新彩蛋', text: '千问在场时偶尔会撞见：DeepSeek 把你交代的活偷偷外包给了千问，自己抱着枕头睡大觉。点她一下试试？' },
+    ] },
     { version: '1.3.6', items: [
       { icon: '🔔', title: 'Codex 重置提醒', text: '官方提前宣布要重置 Codex 额度时，GPT 的额度下方会多一行；右键「会重置吗？」可以问她，她会按预测的概率回答。默认关着，在「额度」页打开。', go: { tab: 'quota', key: 'codexResets' } },
       { icon: '📱', title: 'GPT 的新动作', text: '被问「会重置吗？」时她会查手机，再摇铃铛、期待、怀疑或者摇头。原版和降智龙崽各一套。' },
