@@ -87,11 +87,15 @@ namespace CrossPet
                 try { if (Directory.Exists(dst)) Directory.Delete(dst, true); CopyDir(dir, dst); }
                 catch (Exception e) { Log("同步角色失败 " + dir + ": " + e.Message); }
             }
-            foreach (var md in Directory.GetFiles(src, "*.md")) File.Copy(md, Path.Combine(Characters, Path.GetFileName(md)), true);
+            // 下面这些复制失败（文件被别的程序占着）只记一笔：旧的那份还能用，不能因为一个说明文件把桌宠拦在启动前
+            // （更新失败回退后重开旧版本，characters\LICENSE.md 还被占着，整个启动就失败了）
+            foreach (var md in Directory.GetFiles(src, "*.md"))
+                try { File.Copy(md, Path.Combine(Characters, Path.GetFileName(md)), true); } catch (Exception e) { Log("同步说明文件失败 " + md + ": " + e.Message); }
             // 1.3.4 测试版 1 把网页同步到了 数据目录\web（后来不这么做了）：删掉这份用不上的拷贝
             try { var web = Path.Combine(Data, "web"); if (Directory.Exists(web)) Directory.Delete(web, true); } catch { }
             var hook = Path.Combine(Install, "integrations", "crosspet-hook.py");
-            if (File.Exists(hook)) File.Copy(hook, Path.Combine(Data, "crosspet-hook.py"), true);
+            if (File.Exists(hook))
+                try { File.Copy(hook, Path.Combine(Data, "crosspet-hook.py"), true); } catch (Exception e) { Log("同步钩子脚本失败: " + e.Message); }
             if (!File.Exists(AppMap)) File.Copy(Path.Combine(Install, "apps.json"), AppMap);
             else
             {

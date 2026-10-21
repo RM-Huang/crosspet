@@ -5,7 +5,7 @@ if [ "$(uname -s)" = "Linux" ]; then
   exec /usr/bin/python3 app/linux/install.py --uninstall "$@"
 fi
 pkill -x CrossPet 2>/dev/null || true
-for t in claude-hooks claude-mod codex deepseek gemini antigravity workbuddy zcode hermes; do python3 tools/integrate.py uninstall "$t"; done
+for t in claude-hooks claude-mod codex deepseek gemini antigravity workbuddy zcode hermes qwen; do python3 tools/integrate.py uninstall "$t"; done
 rm -rf "$HOME/Applications/CrossPet.app" "/Applications/CrossPet.app"
 printf "要删除你的角色和设置吗（~/Library/Application Support/CrossPet，包括自己加的角色）？[y/N] "
 read -r a

@@ -27,6 +27,9 @@ default_data = Path(os.environ.get("CROSSPET_DATA_DIR") or str(Path(os.environ.g
 if sys.platform == "linux":
     default_data = Path(os.environ.get("CROSSPET_DATA_DIR") or str(
         Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "crosspet"))
+# 桌宠的数据目录（角色、退出记号）：优先 CROSSPET_DATA_DIR；Windows 用 LOCALAPPDATA，
+# Linux 用 XDG_DATA_HOME（默认 ~/.local/share），macOS 用 Application Support。
+app_data = default_data if (os.name == "nt" or sys.platform == "linux" or os.environ.get("CROSSPET_DATA_DIR")) else Path.home() / "Library/Application Support/CrossPet"
 state_dir = Path(os.environ.get("CROSSPET_STATE_DIR") or (str(default_data / "state") if os.name == "nt" else "/tmp/crosspet"))
 
 # 跟着 AI 出现：开始干活（会话开始 / 发消息 / 调模型）时桌宠没开着就把它打开。
@@ -143,7 +146,7 @@ def app_started_at():
 
 def ensure_pet() -> str:
     """返回这次的结果（写进 <状态目录>/autostart.txt，排查「为什么没出来」用）"""
-    data = default_data if os.name == "nt" or sys.platform == "linux" else Path.home() / "Library/Application Support/CrossPet"
+    data = app_data
     quit_flag = data / "user-quit"
     if quit_flag.exists():
         quit_at = quit_flag.stat().st_mtime
@@ -341,19 +344,23 @@ if character == "gpt" and "transcript_path" in event:
     else:
         sys.exit(0)
 
-# 多模型宿主（WorkBuddy、ZCode、Hermes Agent）：每条事件都带当前模型名，按它选角色；认不出的模型（混元、Kimi、GLM……）
+# 多模型宿主（WorkBuddy、ZCode、Hermes Agent、Qwen Code）：事件里带当前模型名就按它选角色；认不出的模型（混元、Kimi、GLM……）
 # 写给「当前角色」（current），桌宠用正在显示的角色演，不换人。当前角色另外记在 <宿主>-host.json，
 # 桌宠切到这个程序的窗口时按它换角色
-MULTI_MODEL_HOSTS = ("workbuddy", "zcode", "hermes")
-# ZCode 默认用智谱的 GLM；它只在会话开始时告诉模型名，之后的事件按会话 id 查当时记下的模型
-HOST_DEFAULT_MODEL = {"zcode": "glm"}
-characters_dir = (default_data if os.name == "nt" or sys.platform == "linux" else Path.home() / "Library/Application Support/CrossPet") / "characters"
+MULTI_MODEL_HOSTS = ("workbuddy", "zcode", "hermes", "qwen")
+# ZCode 默认用智谱的 GLM；Qwen Code 默认用自家的千问。它们只在会话开始时告诉模型名，
+# 之后的事件按会话 id 查当时记下的模型
+HOST_DEFAULT_MODEL = {"zcode": "glm", "qwen": "qwen"}
+characters_dir = app_data / "characters"
 
 
 def character_for_model(model: str):
     m = model.lower()
     if "glm" in m or "zhipu" in m or "chatglm" in m or "z.ai" in m or "zai-" in m:
         return "glm"
+    # coder-model：Qwen Code 用千问账号登录时报的模型别名（实为 Qwen 3.7 Max）
+    if "qwen" in m or "dashscope" in m or "bailian" in m or "tongyi" in m or m == "coder-model":
+        return "qwen"
     if "kimi" in m or "moonshot" in m:
         return "kimi"
     if "deepseek" in m:
@@ -370,23 +377,42 @@ def character_for_model(model: str):
 def remember_session_model(host: str, fallback: str = "") -> str:
     """有的宿主只在会话开始时给模型名：记下来（按会话 id），之后的事件查它"""
     sid = str(event.get("session_id") or event.get("sessionId") or "")
-    # claude / gpt 是角色名，<角色>-sessions.json 已经是多会话状态文件了，模型另记一个文件
-    path = state_dir / (f"{host}-models.json" if host in SELF_HOSTS else f"{host}-sessions.json")
+    # 宿主名本身就是角色名时（claude / gpt / qwen），<名字>-sessions.json 已经被多会话状态占用了（见 update_sessions），
+    # 模型得另记一个文件：不然记模型会把会话状态当模型名读回来（character_for_model 收到 dict 直接崩）
+    path = state_dir / (f"{host}-models.json" if host in NAMED_HOSTS else f"{host}-sessions.json")
+    model = str(event.get("model") or "")
+    if model and sid:
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+            # 同一宿主的几个会话会同时启动：锁住「读旧表 → 加新项 → 替换」整段。
+            # 临时文件也按目标文件命名，不能与 update_sessions 的 .qwen-sessions.json 抢同一路径。
+            with open(state_dir / f".{host}-models.lock", "a+b") as lock:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                try:
+                    try:
+                        known = json.loads(path.read_text())
+                    except Exception:
+                        known = {}
+                    known[sid] = model
+                    known = dict(list(known.items())[-50:])  # 只留最近的会话
+                    tmp = state_dir / f".{path.stem}.{os.getpid()}.json"
+                    tmp.write_text(json.dumps(known))
+                    tmp.replace(path)
+                finally:
+                    if os.name == "nt":
+                        lock.seek(0)
+                        msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+        except Exception:
+            pass
     try:
         known = json.loads(path.read_text())
     except Exception:
         known = {}
-    model = str(event.get("model") or "")
-    if model and sid:
-        known[sid] = model
-        known = dict(list(known.items())[-50:])  # 只留最近的会话
-        try:
-            state_dir.mkdir(parents=True, exist_ok=True)
-            tmp = state_dir / f".{host}-sessions.json"
-            tmp.write_text(json.dumps(known))
-            tmp.replace(path)
-        except Exception:
-            pass
     return model or known.get(sid, "") or fallback or HOST_DEFAULT_MODEL.get(host, "")
 
 
@@ -412,6 +438,8 @@ def installed(c) -> bool:
 # 按模型换成对应的角色，认不出的模型还是由自己来演。Codex 每条事件都带模型名；Claude Code 只在会话开始时给，
 # 另外看环境变量里的模型名和接口地址
 SELF_HOSTS = ("claude", "gpt")
+# 宿主名同时也是角色名的：它们的 <名字>-sessions.json 被多会话状态占用，记模型要另开一个文件（见 remember_session_model）
+NAMED_HOSTS = SELF_HOSTS + ("qwen",)
 if character in SELF_HOSTS:
     host = character
     # 先看事件里的模型名（Claude Code 会话开始时给的、Codex 每条都给的，是实际要用的那个）；
@@ -452,6 +480,88 @@ if character in MULTI_MODEL_HOSTS:
 
 arg_event = sys.argv[2] if len(sys.argv) > 2 else ""
 name = event.get("hook_event_name") or arg_event
+
+
+# ---- 按轮次丢掉迟到的事件（Codex：事件带 turn_id；PR #26 @KQYaili 报的）----
+# 一轮结束（Stop / 打断 / 手动 compact 完）后，子任务、工具的事件还会陆续到；上一轮的事件也可能在新的一轮里才到。
+# 不拦的话，她刚开心完又被拉回「思考」，或者正在跑的新一轮被旧事件盖掉。按「会话 + 轮次」记在 <宿主>-turns.json：
+# 结束过的轮次再来的事件直接丢掉；子任务（带 agent_id）跟着主轮次走，主轮次结束了它的事件也丢掉。不带 turn_id 的宿主照旧
+TURN_END = ("Stop", "StopFailure", "Interrupt")
+TURN_KEEP = 24 * 3600
+
+
+def turn_gate(owner: str, sid: str, tid: str, name: str, child: bool) -> bool:
+    """这条事件要不要演。顺便记账（几个钩子可能同时到，用文件锁排队）"""
+    path = state_dir / f"{owner}-turns.json"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    with open(state_dir / f".{owner}-turns.lock", "a+b") as lock:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                book = json.loads(path.read_text(encoding="utf-8-sig"))
+                if not isinstance(book, dict):
+                    book = {}
+            except Exception:
+                book = {}
+            now = time.time()
+            book = {k: v for k, v in book.items() if isinstance(v, dict) and now - float(v.get("ts", 0)) < TURN_KEEP}
+            rec = book.get(sid) or {"turn": "", "done": False, "finished": []}
+            finished = rec.get("finished") or []
+            if child:
+                allow = not rec.get("done")   # 主轮次已经结束：子任务迟到的事件
+            elif tid in finished:
+                allow = False                 # 结束过的轮次
+            else:
+                allow = True
+                if tid != rec.get("turn"):
+                    # 新的一轮（发了消息、手动 compact、或第一次见到）：被它取代的上一轮也算结束了（没收到 Stop 也一样）
+                    if rec.get("turn") and rec["turn"] not in finished:
+                        finished = (finished + [rec["turn"]])[-20:]
+                    rec = {"turn": tid, "done": False, "finished": finished}
+                ends = name in TURN_END or (name == "PostCompact" and str(event.get("trigger", "")).lower() == "manual")
+                if ends:
+                    rec["done"] = True
+                    rec["finished"] = (finished + [tid])[-20:]
+            rec["ts"] = now
+            book[sid] = rec
+            tmp = state_dir / f".{owner}-turns.{os.getpid()}.json"
+            tmp.write_text(json.dumps(book))
+            tmp.replace(path)
+            return allow
+        finally:
+            if os.name == "nt":
+                try:
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+                except Exception:
+                    pass
+
+
+turn_id = str(event.get("turn_id") or "")
+turn_sid = str(event.get("session_id") or "")
+if turn_id and turn_sid:
+    is_child = bool(event.get("agent_id"))
+    try:
+        if not turn_gate(sys.argv[1] if len(sys.argv) > 1 else "claude", turn_sid, turn_id, name, is_child):
+            if arg_event:
+                print("{}")
+            sys.exit(0)
+    except SystemExit:
+        raise
+    except Exception:
+        pass   # 记账出错：照旧演，不能因为这个不动
+    if is_child:
+        # 子任务的第一条消息不是你发的消息；子任务停下也不等于这一轮结束
+        if name == "UserPromptSubmit":
+            name = "SubagentStart"
+        elif name in TURN_END:
+            name = "SubagentStop"
 call = event.get("toolCall") if isinstance(event.get("toolCall"), dict) else {}  # Antigravity
 tool = str(event.get("tool_name") or call.get("name", "")).lower()
 tool_input = json.dumps(event.get("tool_input") or call.get("args", ""), ensure_ascii=False).lower()
@@ -489,7 +599,7 @@ def pose_for_tool(t: str) -> str:
     # Hermes Agent：在本地找文件 / 翻历史会话 / 看终端输出 / 看图，都算看资料（名字里带 search，别当成上网搜）
     if t in ("search_files", "session_search", "read_terminal", "vision_analyze"):
         return "reading"
-    if "view_image" in t or t == "find_by_name":
+    if "view_image" in t or t in ("find_by_name", "zoom_image"):   # zoom_image：Qwen Code 放大看图
         return "reading"
     if t in ("read_url_content",) or t.startswith("browser"):
         return "searching"

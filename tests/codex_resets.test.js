@@ -84,7 +84,10 @@ test('toAnnounce：新的强预测 / 新宣布说一次，说过的、弱的、�
 test('windowText / fill', () => {
   assert.strictEqual(R.windowText('next 48h'), '接下来 48 小时内')
   assert.strictEqual(R.windowText('next 2 days'), '接下来 2 天内')
-  assert.strictEqual(R.windowText('this week'), 'this week')
+  assert.strictEqual(R.windowText('within 24h'), '24 小时内')   // 站点 10 月实际给的写法（@chin190 在 #16 报的）
+  assert.strictEqual(R.windowText('Within 2 days'), '2 天内')
+  assert.strictEqual(R.windowText('in 12 hours'), '12 小时内')
+  assert.strictEqual(R.windowText('this week'), '')   // 认不出：不硬塞英文进句子
   assert.strictEqual(R.fill('{chance}%，{window}', { chance: 85, window: '接下来 48 小时内' }), '85%，接下来 48 小时内')
   assert.strictEqual(R.fill('没有 {x}', {}), '没有 {x}')
 })
@@ -92,4 +95,54 @@ test('windowText / fill', () => {
 test('LINES：每个台词键都有默认句', () => {
   for (const k of ['resetAnnounced', 'resetDone', 'resetHigh', 'resetMid', 'resetLow', 'resetNone', 'resetQuiet', 'resetOffline'])
     assert.ok(Array.isArray(R.LINES[k]) && R.LINES[k].length, k)
+})
+
+test('answer：窗口认不出时不带 window', () => {
+  const d = R.parse(base({ active_watch: watch('strong', 85, { forecast_window: 'sometime soon' }) }))
+  const a = R.answer(d, NOW, 0)
+  assert.strictEqual(a.tier, 'high')
+  assert.deepStrictEqual(a.vars, { chance: 85 })
+  assert.deepStrictEqual(R.answer(R.parse(base({ active_watch: watch('strong', 85, { forecast_window: 'within 24h' }) })), NOW, 0).vars, { chance: 85, window: '24 小时内' })
+})
+
+test('usableLines：只挑数据齐全的句子，角色的都用不了时退回默认句', () => {
+  const own = ['{chance}%。{window}，可以期待一下。', '{chance}%，这次真有戏。']
+  assert.deepStrictEqual(R.usableLines(own, 'resetHigh', { chance: 85 }), ['{chance}%，这次真有戏。'])
+  assert.deepStrictEqual(R.usableLines(own, 'resetHigh', { chance: 85, window: '24 小时内' }), own)
+  assert.deepStrictEqual(R.usableLines(['{window}……要重置了吧？吧？'], 'resetHigh', { chance: 85 }), R.LINES.resetHigh.filter(l => !l.includes('{window}')))
+  assert.ok(R.usableLines(['{window}……'], 'resetHigh', { chance: 85 }).length > 0)
+  assert.deepStrictEqual(R.usableLines(['有点风声，{chance}% 吧'], 'resetMid', {}), ['有点风声……别太指望。'])
+  assert.deepStrictEqual(R.usableLines(['{x}'], 'nope', {}), [''])
+})
+
+// 官方没提前宣布、直接发「已经重置」（10-20 那次就是这样）：重置后 5 小时内算「刚重置过」
+const latestAt = (sec) => ({ id: 'r1', reset_type: 'regular', announced_at: new Date(sec * 1000).toISOString(), text: 't', source: { type: 'x_post', author: 'thsottiaux', url: 'u' } })
+test('刚重置过：5 小时内问她答 recent，过了答 none', () => {
+  const d = R.parse(base({ latest_reset: latestAt(NOW - 2 * 3600) }))
+  const a = R.answer(d, NOW, 0)
+  assert.strictEqual(a.tier, 'recent')
+  assert.strictEqual(a.pose, 'reset')
+  assert.strictEqual(a.key, 'resetRecent')
+  assert.strictEqual(a.vars.ago, '2 小时前')
+  assert.strictEqual(R.answer(R.parse(base({ latest_reset: latestAt(NOW - 20 * 60) })), NOW, 0).vars.ago, '20 分钟前')
+  assert.strictEqual(R.answer(R.parse(base({ latest_reset: latestAt(NOW - 6 * 3600) })), NOW, 0).tier, 'none')
+})
+test('刚重置过：额度下方的一行', () => {
+  assert.strictEqual(R.notice(R.parse(base({ latest_reset: latestAt(NOW - 2 * 3600) })), 0, NOW), '✨ 2 小时前刚重置过')
+  assert.strictEqual(R.notice(R.parse(base({ latest_reset: latestAt(NOW - 6 * 3600) })), 0, NOW), '')
+})
+test('刚重置过：新宣布优先于「刚重置过」', () => {
+  const d = R.parse(base({ latest_reset: latestAt(NOW - 3600), scheduled_reset: sched() }))
+  assert.strictEqual(R.answer(d, NOW, 0).tier, 'announced')
+  assert.ok(R.notice(d, 0, NOW).startsWith('🔔'))
+})
+test('刚重置过：主动说一次；说过或我们自己已经看到重置就不说', () => {
+  const d = R.parse(base({ latest_reset: latestAt(NOW - 3600) }))
+  assert.deepStrictEqual(R.toAnnounce(d, NOW, 0, []), { id: 'r:r1' })
+  assert.strictEqual(R.toAnnounce(d, NOW, 0, ['r:r1']), null)
+  assert.strictEqual(R.toAnnounce(d, NOW, NOW - 600, []), null)   // 额度变化已经判出重置、庆祝过了
+  assert.strictEqual(R.toAnnounce(R.parse(base({ latest_reset: latestAt(NOW - 6 * 3600) })), NOW, 0, []), null)
+})
+test('LINES：resetRecent 有默认句', () => {
+  assert.ok(R.LINES.resetRecent.length && R.LINES.resetRecent.every(l => l.includes('{ago}') || !l.includes('{')))
 })

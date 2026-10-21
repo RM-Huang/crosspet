@@ -47,8 +47,10 @@ namespace CrossPet
             return (x, old.Bottom - h);
         }
 
-        // ---- 网页大小核对：只记日志（原因见 ZoomCheck）----
+        // ---- 网页大小核对：记日志；系统缩放被算了两遍时自动修正（见 ZoomCheck.Fix）----
         double shownZoom;   // 窗口现在按的人物大小
+        double zoomFix = 1;   // 给网页的缩放 = 人物大小 × 这个系数；只有 ZoomCheck.Fix 认出「系统缩放算了两遍」时才不是 1
+        int zoomFixes;   // 这次运行修正过几次：最多 3 次，免得来回改
         DispatcherTimer zoomCheckTimer;
         /// <summary>调完大小 / 换完缩放停 1 秒再量（拖滑块时每一帧都在变，别每帧都量）</summary>
         void CheckZoomSoon()
@@ -77,8 +79,16 @@ namespace CrossPet
                 var second = await PageSize();
                 if (first == null || second == null) return;
                 var (w1, h1) = first.Value; var (w2, h2) = second.Value;
-                if (ZoomCheck.Off(pageW, pageH, w1, h1, w2, h2))
-                    Store.Log($"网页大小和画布对不上（只记录）：网页 {Math.Round(w2)}×{Math.Round(h2)}，应为 {Math.Round(pageW)}×{Math.Round(pageH)}，缩放 {Num(Math.Round(web.ZoomFactor, 3))}，DPI {Math.Round(VisualTreeHelper.GetDpi(Window).DpiScaleX * 100)}%");
+                if (!ZoomCheck.Off(pageW, pageH, w1, h1, w2, h2)) return;
+                var dpi = VisualTreeHelper.GetDpi(Window).DpiScaleX;
+                var fix = zoomFixes < 3 ? ZoomCheck.Fix(pageW, pageH, w2, h2, dpi, zoomFix) : null;
+                Store.Log($"网页大小和画布对不上{(fix == null ? "（只记录）" : "")}：网页 {Math.Round(w2)}×{Math.Round(h2)}，应为 {Math.Round(pageW)}×{Math.Round(pageH)}，缩放 {Num(Math.Round(web.ZoomFactor, 3))}，DPI {Math.Round(dpi * 100)}%");
+                if (fix == null) return;
+                zoomFixes++; zoomFix = fix.Value;
+                web.ZoomFactor = shownZoom * zoomFix;
+                lastHitRects = null; dockCut.Clear();
+                Store.Log($"系统缩放像是被算了两遍：网页缩放自动改成 {Num(Math.Round(web.ZoomFactor, 3))}（人物大小 {Num(shownZoom)} × {Num(Math.Round(zoomFix, 3))}），再量一次");
+                CheckZoomSoon();
             }
             catch (Exception e) { Store.Log("检查网页大小出错: " + e.Message); }
         }
@@ -104,7 +114,7 @@ namespace CrossPet
             Native.GetWindowRect(hwnd, out var old);
             Window.Width = pageW * scale; Window.Height = pageH * scale;
             Window.UpdateLayout();
-            if (web != null) web.ZoomFactor = scale;
+            if (web != null) web.ZoomFactor = scale * zoomFix;
             shownZoom = scale;
             CheckZoomSoon();
             Native.GetWindowRect(hwnd, out var now);

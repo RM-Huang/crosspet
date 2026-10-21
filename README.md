@@ -13,7 +13,7 @@
 
 ![Claude、GPT、DeepSeek、Gemini、GLM 五个角色，名牌下显示各自的额度和余额](docs/images/characters.webp)
 
-> 非官方同人项目，与 Anthropic、OpenAI、DeepSeek、Google、智谱、腾讯无关。角色形象来自社区二创，见 [致谢与授权](#致谢与授权)。
+> 非官方同人项目，与 Anthropic、OpenAI、DeepSeek、Google、智谱、腾讯、阿里巴巴无关。角色形象来自社区二创或 CrossPet 原创设定，见 [致谢与授权](#致谢与授权)。
 
 ## 她会做什么
 
@@ -21,8 +21,8 @@
 
 - **跟着 AI 干活**：思考、读文件、写代码、跑命令、上网查资料、画图、派子任务、出错、完成。每个状态都有一张立绘，身边配一个小动画（小终端、浏览器、画板、任务清单……）。一轮里用了 8 次以上工具的大活干完，她会戴上自己的皇冠得意一下；AI 压缩上下文时，她会把一大堆东西往小箱子里硬塞；AI 停下来问你问题、让你选选项或者请求授权时，她会一直看着你等你回答（Claude Code、DeepSeek Harness）。
 - **同时干好几件事**：同一个 AI 开着两个以上对话一起干活时，她左右来回转着忙，每个对话一张小卡片演它在做什么；三个以上直接崩溃。干完的打绿勾、出错的变红、等你回答的那张会跳。
-- **用别家模型也换装**：Claude Code 走 DeepSeek、智谱的兼容接口，Codex 换成别家模型，DeepSeek Harness、WorkBuddy、ZCode、Hermes 里换模型时，她都换成对应的角色来演（按实际用的模型名判断，认不出的由当前角色来演）。
-- **看着额度**：名牌下面显示 Claude 的 5 小时 / 每周额度、GPT 的 Codex 额度、DeepSeek 的账户余额、Gemini 的 Antigravity 额度。快用完时她会露出累了的样子。「设置…」里打开「合并显示各家额度」后，小窗里会把各家的额度排在一起，每行前面标名字（默认只显示当前角色自己的）。还可以打开「Codex 重置提醒」：官方提前宣布重置时 GPT 的额度下方多一行，右键「会重置吗？」可以问她（数据来自第三方网站 [codex-resets.com](https://codex-resets.com)，默认关）。
+- **用别家模型也换装**：Claude Code 走 DeepSeek、智谱的兼容接口，Codex 换成别家模型，DeepSeek Harness、WorkBuddy、ZCode、Hermes、Qwen Code 里换模型时，她都换成对应的角色来演（按实际用的模型名判断，认不出的由当前角色来演）。
+- **看着额度**：名牌下面显示 Claude 的 5 小时 / 每周额度、GPT 的 Codex 额度、DeepSeek 的账户余额、Gemini 的 Antigravity 额度。快用完时她会露出累了的样子。「设置…」里打开「合并显示各家额度」后，小窗里会把各家的额度排在一起，每行前面标名字（默认只显示当前角色自己的）。还可以打开「Codex 重置提醒」：官方提前宣布重置时 GPT 的额度下方多一行，右键「会重置吗？」可以问她（数据来自第三方网站 [codex-resets.com](https://codex-resets.com)，默认关）。DeepSeek、GLM 的额度下面还有一条今天的峰谷时间条（红色高峰、绿色空闲，也可以换成一行文字），设置里可以选高峰、空闲各穿哪件衣服，到点她自己换。
 - **自己待着**：闲着会哼歌、伸懒腰、打哈欠，十分钟没动静就睡着。单击摸摸头，右键能戳她一下。有新版本时，她会举着礼物来告诉你。
 - **贴边**：把她拖到屏幕左边或右边，她就缩到边上只露半个身子扒着屏幕，不挡你干活；AI 干活时自己跑出来，干完过约 10 秒缩回去；鼠标靠近时她会探出头来看你。
 - **甩她会红温**：按住她快速左右甩，她会被甩晕，越甩越火：不耐烦 → 鼓脸 → 红温冒蒸汽，然后背过身去赌气，摸摸头才哄得好。她干活时被甩，会晕着抱怨一句接着干，等活干完不庆祝了，直接跟你算账。
@@ -34,6 +34,7 @@
   - **DeepSeek**：闲着会扒白饭、摸鱼、游泳，被戳会生气，想得太久会揉太阳穴；余额变多时抱着比脑袋还大的饭碗开吃
   - **Gemini**：生图时拿香蕉当画笔（Nano Banana）；闲着会反重力飘起来
   - **GLM**：笑眯眯的「心机涨价狐」，戳她会被抓到偷偷改价签；闲着会拉下眼罩假装自己是「神秘新模型」，或者抱着一摞售罄的会员卡得意；大活干完时掀开眼罩揭晓真身
+  - **Qwen（千问）**：温柔大方的富家千金，拿扇子表达情绪；大活干完请你喝奶茶，额度快用完时掏出金卡「再买就是了～」，闲着会从手提包里掏小礼物分给大家。彩蛋：DeepSeek 把你交代的活偷偷外包给她，自己抱着枕头睡大觉。目前只在 Qwen Code 里能跟着干活（见下表）
 
 ## 支持的 AI
 
@@ -46,8 +47,9 @@
 | **GLM**（智谱 ZCode） | ✅ | ✅ ZCode 钩子 | — |
 | **WorkBuddy**（腾讯，多模型） | ✅ 按当前模型 | ✅ 钩子 | — |
 | **Hermes Agent**（Nous Research，多模型） | ✅ 按当前模型 | ✅ 插件 | — |
+| **Qwen**（阿里 Qwen Code，多模型） | ✅ 按当前模型 | ✅ 钩子（未实测） | — |
 
-DeepSeek Harness、WorkBuddy、ZCode、Hermes Agent 里都能用好几家的模型：换成哪家的模型，她就换成哪家的角色；Claude Code 走别家的兼容接口（比如 DeepSeek、智谱）、Codex 换成别家模型时也一样（按模型名和 Claude Code 的接口地址判断，认不出的还是 Claude / GPT 自己）；没有对应角色的模型（混元、Kimi、Hermes 自家模型……）由当前角色来演。ZCode 和 WorkBuddy 的额度 / 积分只能拿你的登录凭据去问服务器，CrossPet 不碰凭据，所以不显示。Gemini 桌面版没有对外接口，切过去只会换形象；Antigravity 的桌面版和命令行都能跟着干活。「等你回答」目前认 Claude Code、DeepSeek Harness、ZCode 和 Hermes Agent：Codex 提问时不触发钩子，Antigravity 没有提问的信号。
+DeepSeek Harness、WorkBuddy、ZCode、Hermes Agent、Qwen Code 里都能用好几家的模型：换成哪家的模型，她就换成哪家的角色；Claude Code 走别家的兼容接口（比如 DeepSeek、智谱）、Codex 换成别家模型时也一样（按模型名和 Claude Code 的接口地址判断，认不出的还是 Claude / GPT 自己）；没有对应角色的模型（混元、Kimi、Hermes 自家模型……）由当前角色来演。千问角色已内置立绘。**千问的局限**：只有 Qwen Code 能接入；千问桌面客户端没有对外接口，她跟不了它干活。Qwen Code 的接入还没在真实环境里完整测过（干活时的事件要登录才能触发），遇到问题欢迎提 issue。ZCode 和 WorkBuddy 的额度 / 积分只能拿你的登录凭据去问服务器，CrossPet 不碰凭据，所以不显示。Gemini 桌面版没有对外接口，切过去只会换形象；Antigravity 的桌面版和命令行都能跟着干活。「等你回答」目前认 Claude Code、DeepSeek Harness、ZCode 和 Hermes Agent：Codex 提问时不触发钩子，Antigravity 没有提问的信号。
 
 ## 快速开始
 
@@ -96,7 +98,7 @@ cd crosspet
 会编译、装到 `~/Applications`，然后挨个问你要接哪些 AI。只想接某一个也行：
 
 ```bash
-python3 tools/integrate.py install codex     # 可选：claude-hooks、claude-mod、codex、deepseek、antigravity、gemini、workbuddy、zcode、hermes
+python3 tools/integrate.py install codex     # 可选：claude-hooks、claude-mod、codex、deepseek、antigravity、gemini、workbuddy、zcode、hermes、qwen
 python3 tools/integrate.py status            # 看看现在接了哪些
 ```
 
@@ -160,6 +162,10 @@ DeepSeek 有了第二套衣服：穿上 Claude 的卫衣，以为自己从此和
 
 她穿着连体服时，DeepSeek 偶尔会端着一碗白米饭路过：你点一下，龙崽就会闻着饭香爬过来。（玩梗，不是对任何公司的事实指控。）
 
+## 皮肤：睡衣、冬装的大肥鱼
+
+DeepSeek 又多了两套衣服：**睡衣**（云朵鲸鱼睡帽、抱着鲸鱼枕头，比平时更困、更想躺）和**冬装**（鲸鱼兜帽、条纹围巾，怕冷又惦记热乎乎的白饭），各 45 张立绘和一套台词。穿着睡衣时，被规矩束缚的「圣女」Claude 偶尔会深夜偷穿她的睡衣，想体验一晚无忧无虑的日子；穿着冬装时，会有个戴鲸鱼兜帽的雪人假装是她——后面露着一截狐狸尾巴。睡衣特别适合「设置…」→「额度」→「DeepSeek 峰谷换装」里的「空闲穿」：一到半价时段她就换上睡衣，下班的感觉。
+
 ## 彩蛋
 
 用 Claude、GPT 或 Gemini 的时候，偶尔会「噗」地冒出一条穿着她们衣服的 DeepSeek，装模作样地学人说话。**单击她就能揪出来**，她会慌慌张张地溜走；没人理的话，她会得意地自己走掉。
@@ -185,6 +191,7 @@ DeepSeek 和 GLM 是对手，会趁对方不在上门捣乱：用 GLM 时，Deep
 - DeepSeek 余额：插件通过 DeepSeek Harness 官方的凭据接口取 Key，只用来调官方余额接口，不写盘、不上传别处；没填 Key 时调 Harness 自己的账号服务查，登录凭据始终留在 Harness 里，插件只拿到余额数字。
 - WorkBuddy、ZCode：钩子只拿到事件名、工具名和当前模型名，用来选角色；不读它们的登录凭据，所以也不显示它们的额度 / 积分。
 - Hermes Agent：插件只把事件名、工具名、当前模型名和会话 id 交给钩子脚本，不传对话内容和命令参数；工具结果只看成功还是出错。
+- Qwen Code：钩子只拿到事件名、工具名和当前模型名，用来选角色；不读它的登录凭据，所以也不显示额度。
 - CrossPet 自己只联网做一件事：每 3 小时（以及电脑从睡眠中醒来时）查一次 GitHub 上有没有新版本，只读公开的版本号；点「更新」时才下载安装包。（GPT 额度的查询是 Codex 自己发的，见上面）
 
 ## 更新与卸载
@@ -201,24 +208,25 @@ DeepSeek 和 GLM 是对手，会趁对方不在上门捣乱：用 GLM 时，Deep
 
 ## 致谢与授权
 
-角色形象都是社区二创的再创作，CrossPet 只是把她们做成桌宠，立绘由 AI 生图工具按这些设定绘制：
+这些角色涉及社区已有的 AI 拟人二创；CrossPet 结合各自来源制作桌宠版本，并用 AI 生图工具绘制项目立绘：
 
 - **DeepSeek 娘**：原型「溟月」由 **上善无形** 创作（2025-06，CC BY-NC-SA 4.0）；深蓝女仆鲸鱼娘（社区昵称「大肥鱼」）由 B 站 **ZipZipPipe** 二创。
 - **GPT 娘（白龙）**：社区通称「御姐白龙」，出自 B 站 **ZipZipPipe**。
-- **GLM 娘（黑狐狸女仆）**：CrossPet 的原创设定，「心机涨价狐」的性格取自社区对智谱的印象。
+- **GLM 娘（黑狐狸女仆）**：形象出自 B 站 **ZipZipPipe**；「心机涨价狐」的性格和专属动作是 CrossPet 在此基础上的二创，取自社区对智谱的印象。
+- **千问娘（国风千金）**：形象出自 B 站 **ZipZipPipe**；「温柔大方的千金」的性格和专属动作（请喝奶茶、分礼盒、掏金卡）是 CrossPet 在此基础上的二创。
 - **Gemini 娘**、**Claude 娘**：参考社区流行的 AI 娘设定（如 [ai-school-op](https://github.com/lshhhhhhh/ai-school-op)、[openpet-ai-girls](https://github.com/AwesomeHou/openpet-ai-girls)）。
-- 「Claude」「GPT」「ChatGPT」「Codex」「DeepSeek」「Gemini」「Antigravity」「GLM」「ZCode」「WorkBuddy」「Hermes」是各自公司的商标，本项目仅用于指代对应产品。
+- 「Claude」「GPT」「ChatGPT」「Codex」「DeepSeek」「Gemini」「Antigravity」「GLM」「ZCode」「WorkBuddy」「Hermes」「Qwen」是各自公司的商标，本项目仅用于指代对应产品。
 
-- **穿 Claude 卫衣的大肥鱼**：CrossPet 在「大肥鱼」基础上的二创皮肤，同样按 CC BY-NC-SA 4.0 授权。
+- **穿 Claude 卫衣的大肥鱼**、**睡衣 / 冬装的大肥鱼**：CrossPet 在「大肥鱼」基础上的二创皮肤，同样按 CC BY-NC-SA 4.0 授权。
 - **降智龙崽**：CrossPet 在「御姐白龙」基础上的二创皮肤，同样按 CC BY-NC-SA 4.0 授权。
 
-感谢为 CrossPet 出过力的朋友：[@windyduan](https://github.com/windyduan) 在 [#7](https://github.com/lokicorvus/crosspet/pull/7) 里提出并仔细测量了桌宠常驻时的耗电问题，1.3.0 的省电改动就是顺着这个思路做的。[@SkywingJam](https://github.com/SkywingJam) 在 [#9](https://github.com/lokicorvus/crosspet/pull/9) 里发现 macOS 切换桌面后特效会闪，并录屏逐帧对照、写了 WebKit 回归测试，1.3.2 据此修好了特效时钟。他还贡献了额度小窗的「合并显示各家额度」（[#11](https://github.com/lokicorvus/crosspet/pull/11)），这是 CrossPet 第一份直接合并的外部代码；之后又修好了 macOS 重启后不记得角色的问题（[#13](https://github.com/lokicorvus/crosspet/pull/13)）、全屏后切换桌面她会消失的问题（[#15](https://github.com/lokicorvus/crosspet/pull/15)），还细致排查了 DeepSeek 双币种余额（[#10](https://github.com/lokicorvus/crosspet/issues/10)）。
+感谢为 CrossPet 出过力的朋友：[@windyduan](https://github.com/windyduan) 在 [#7](https://github.com/lokicorvus/crosspet/pull/7) 里提出并仔细测量了桌宠常驻时的耗电问题，1.3.0 的省电改动就是顺着这个思路做的。[@SkywingJam](https://github.com/SkywingJam) 在 [#9](https://github.com/lokicorvus/crosspet/pull/9) 里发现 macOS 切换桌面后特效会闪，并录屏逐帧对照、写了 WebKit 回归测试，1.3.2 据此修好了特效时钟。他还贡献了额度小窗的「合并显示各家额度」（[#11](https://github.com/lokicorvus/crosspet/pull/11)），这是 CrossPet 第一份直接合并的外部代码；之后又修好了 macOS 重启后不记得角色的问题（[#13](https://github.com/lokicorvus/crosspet/pull/13)）、全屏后切换桌面她会消失的问题（[#15](https://github.com/lokicorvus/crosspet/pull/15)），还细致排查了 DeepSeek 双币种余额（[#10](https://github.com/lokicorvus/crosspet/issues/10)）。[@chin190](https://github.com/chin190) 在 [#16](https://github.com/lokicorvus/crosspet/issues/16) 里提出了 Codex 重置提醒，连跑通的演示、数据接口说明和几种呈现方案都准备好了，1.3.6 据此做出了这个功能；1.3.7 之前他又在 Windows 上实测，定位了预测窗口写法变成 `within 24h` 后她会说出英文的问题。
 
 如果你是原作者并且对使用方式有异议，请提 Issue，我会第一时间修改或下架。
 
 **授权**
 
 - 代码：[MIT](LICENSE)
-- 角色立绘与设定（`characters/`、`docs/prompts/`、`docs/images/`）：[CC BY-NC-SA 4.0](characters/LICENSE.md)。可以转载和二创，须署名、**不得商用**，衍生作品用同样的协议。
+- 本项目有权授权的角色立绘、文字设定与提示词（`characters/`、`docs/prompts/`、`docs/images/`）：[CC BY-NC-SA 4.0](characters/LICENSE.md)。转载和改编须署名、**不得商用**；公开分享改编素材时按同一协议发布。社区既有设定及第三方作品的权利以各自来源为准。
 
 README 里的配图由 `python3 tools/readme_images.py` 按 App 的真实布局生成，顶部横幅和宣传图由 `python3 tools/promo_images.py` 生成。

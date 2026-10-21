@@ -44,6 +44,7 @@ button { font: inherit; border: 1px solid var(--line); background: var(--field);
 button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:disabled { opacity: .5; cursor: default; }
+.peaksel { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; white-space: nowrap; }
 input[type=text], select { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; }
 input[type=text] { width: 150px; }
 input[type=range] { width: 150px; accent-color: var(--accent); }
@@ -123,6 +124,9 @@ input[type=range] { width: 150px; accent-color: var(--accent); }
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="quotaAggregate"><span></span></label></div></div>
   <div class="item"><div class="label">Codex 重置提醒<small>官方提前宣布重置时，GPT 的额度下方多一行；右键「会重置吗？」可以问她。数据来自第三方网站 <button class="srclink" data-action="openCodexResets">codex-resets.com</button>，根据官方推文整理，预测不是 OpenAI 的承诺</small></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="codexResets"><span></span></label></div></div>
+  <div class="item"><div class="label">额度栏显示峰谷时段<small>DeepSeek、GLM 的额度下面显示现在是高峰还是空闲（北京时间）。时间条：今天 24 小时，红色高峰、绿色空闲，竖线是现在；文字：只显示「高峰」或「空闲」。按 DeepSeek 官方 API 和 GLM 编程套餐的规则，其他渠道以各自价格为准；法定节假日暂不识别</small></div>
+    <div class="ctl"><div class="seg" id="peakStyle" data-key="peakStyle"><button data-v="bar">时间条</button><button data-v="text">文字</button><button data-v="off">关</button></div></div></div>
+  <div id="peakOutfits"></div>
 </div>
 
 <div class="card" data-tab="ai" id="integrateCard">
@@ -136,7 +140,7 @@ input[type=range] { width: 150px; accent-color: var(--accent); }
 <div class="card" data-tab="general">
   <div class="item"><div class="label" id="loginLabel">登录时自动启动</div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="login"><span></span></label></div></div>
-  <div class="item"><div class="label">全屏时隐藏<small>看视频、演示、玩游戏等全屏时不出现</small></div>
+  <div class="item"><div class="label">全屏时隐藏<small>看视频、演示、玩游戏等全屏时不出现；AI 程序（Codex、Claude、DeepSeek Harness……）全屏时照常陪着你</small></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="hideFullscreen"><span></span></label></div></div>
   <div class="item"><div class="label">拖到屏幕边缘时贴边<small>拖到屏幕左右边缘松手，她就缩到边上只露半个身子；AI 干活时自己跑出来，干完缩回去</small></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="edgeDock"><span></span></label></div></div>
@@ -159,6 +163,7 @@ input[type=range] { width: 150px; accent-color: var(--accent); }
 <script src="text-size.js"></script>
 <script src="plugin-update.js"></script>
 <script src="whats-new.js"></script>
+<script src="peak-hours.js"></script>
 <script>
 // 和宿主（macOS 的 WKWebView / Windows 的 WebView2）通信：页面发 {cmd, ...}，宿主改完设置后调 setState(state) 把最新状态推回来
 const post = msg => window.chrome?.webview ? window.chrome.webview.postMessage(msg) : window.webkit?.messageHandlers?.settings?.postMessage(msg)
@@ -184,9 +189,9 @@ function setState(s) {
   if (document.activeElement !== $('textSize')) $('textSize').value = text
   $('textSizeVal').textContent = Math.round(text * 100) + '%'
   showLink(linked)
-  for (const el of document.querySelectorAll('[data-key]')) el.checked = !!s[el.dataset.key]
+  for (const el of document.querySelectorAll('input[data-key]')) el.checked = !!s[el.dataset.key]
   // 平台外壳明确声明尚未实现的能力，避免开关看似生效、实际没有后端。
-  for (const el of document.querySelectorAll('[data-key]')) {
+  for (const el of document.querySelectorAll('input[data-key]')) {
     const reason = s.unavailable?.[el.dataset.key]
     el.disabled = !!reason
     el.closest('.item').title = reason || ''
@@ -195,11 +200,13 @@ function setState(s) {
   }
   for (const el of document.querySelectorAll('[data-only]')) el.classList.toggle('hidden', s[el.dataset.only] === undefined || s[el.dataset.only] === null)
   for (const b of $('aura').children) b.classList.toggle('on', b.dataset.v === s.aura)
+  for (const b of $('peakStyle').children) b.classList.toggle('on', b.dataset.v === s.peakStyle)
   const sel = $('character')
   // 有别的衣服（皮肤）的角色展开成几项：「DeepSeek · 女仆装」「DeepSeek · Claude 卫衣」（值写成 角色|皮肤）
   sel.replaceChildren(...s.characters.flatMap(c => c.skins
     ? c.skins.map(k => new Option(`${c.name} · ${k.name}`, `${c.id}|${k.id}`, false, c.id === s.character && k.id === (c.skin || '')))
     : [new Option(c.name, c.id, false, c.id === s.character)]))
+  renderPeakOutfits(s)
   const cur = s.characters.find(c => c.id === s.character)
   if (document.activeElement !== $('name')) { $('name').value = cur?.custom || ''; $('name').placeholder = cur?.defaultName || '' }
   if (s.loginNote) $('loginLabel').innerHTML = `登录时自动启动<small>${s.loginNote}</small>`
@@ -229,6 +236,7 @@ const NEVER_SEEN = {
   workbuddy: '重开 WorkBuddy、开个新对话试试',
   zcode: '新开一个 ZCode 会话试试',
   hermes: '新开一个 Hermes 会话试试',
+  qwen: '新开一个 Qwen Code 会话试试',
 }
 const agoText = s => s < 60 ? '刚刚' : s < 3600 ? `${Math.floor(s / 60)} 分钟前` : s < 86400 ? `${Math.floor(s / 3600)} 小时前` : `${Math.floor(s / 86400)} 天前`
 
@@ -261,8 +269,39 @@ function renderIntegrations(list) {
 // 宿主做完一件事后的提示（接入结果、检查更新结果等）
 function notice(text) { toast(text) }
 
-for (const el of document.querySelectorAll('[data-key]')) el.onchange = () => post({ cmd: 'set', key: el.dataset.key, value: el.checked })
+// 按时段换衣服：每个有峰谷规则、又有别的衣服的角色一组「高峰穿 / 空闲穿」。「不换」= 这一边不管（存的时候删掉）；
+// 改了不会马上换，等下一次时段切换（判断在桌宠页面，peak-hours.js）
+function renderPeakOutfits(s) {
+  const box = $('peakOutfits')
+  if (box.contains(document.activeElement)) return
+  const cur = s.peakSkins || {}
+  box.replaceChildren(...Object.entries(PeakHours.RULES).flatMap(([id, rule]) => {
+    const c = s.characters.find(x => x.id === id)
+    if (!c?.skins) return []
+    const item = document.createElement('div'); item.className = 'item'
+    item.innerHTML = `<div class="label">${c.name} 峰谷换装<small>${rule.label}。到点她自己换；时段里你手动换了，等下一段再按这里换。改了这里也是下一段才生效</small></div><div class="ctl peaksel"></div>`
+    for (const [kind, title] of [['peak', '高峰穿'], ['valley', '空闲穿']]) {
+      const sel = document.createElement('select')
+      sel.setAttribute('aria-label', `${c.name}${title}`)
+      const want = cur[id]?.[kind]
+      sel.append(new Option('不换', '-', false, typeof want !== 'string'), ...c.skins.map(k => new Option(k.name, k.id, false, want === k.id)))
+      sel.onchange = () => {
+        const next = JSON.parse(JSON.stringify(state?.peakSkins || {}))
+        const e = next[id] || {}
+        if (sel.value === '-') delete e[kind]; else e[kind] = sel.value
+        if (Object.keys(e).length) next[id] = e; else delete next[id]
+        if (state) state.peakSkins = next
+        post({ cmd: 'set', key: 'peakSkins', value: next })
+      }
+      const lab = document.createElement('label'); lab.textContent = title + ' '; lab.appendChild(sel)
+      item.querySelector('.peaksel').appendChild(lab)
+    }
+    return [item]
+  }))
+}
+for (const el of document.querySelectorAll('input[data-key]')) el.onchange = () => post({ cmd: 'set', key: el.dataset.key, value: el.checked })
 for (const b of $('aura').children) b.onclick = () => post({ cmd: 'set', key: 'aura', value: b.dataset.v })
+for (const b of $('peakStyle').children) b.onclick = () => post({ cmd: 'set', key: 'peakStyle', value: b.dataset.v })
 for (const b of document.querySelectorAll('[data-action]')) b.onclick = () => post({ cmd: 'action', name: b.dataset.action })
 // 锁链图标：锁着 = 两节扣在一起；解开 = 断开
 const LINK_ON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.5l-1 1a2.5 2.5 0 01-3.5-3.5l1-1"/></svg>'

@@ -71,8 +71,9 @@ extension App {
         updatePageHidden()
     }
 
+    /// 一直允许出现在全屏程序的空间里：AI 程序（Codex、Claude……）全屏时要照常显示，别的程序全屏时由 checkFullscreen 藏起来
     func applyFullscreenBehavior() {
-        panel.collectionBehavior = hideInFullscreen ? [.canJoinAllSpaces, .stationary] : [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         checkFullscreen()
     }
 
@@ -82,7 +83,8 @@ extension App {
     func checkFullscreen() {
         fullscreenCheckedAt = Date()
         if userHidden { return }   // 你用快捷键藏起来的：全屏规则不管她
-        let full = hideInFullscreen && !fullscreenOverride && frontIsFullscreen()
+        // 全屏的是 AI 程序（专心和 AI 干活）：照常显示；看视频、演示、玩游戏才藏
+        let full = hideInFullscreen && !fullscreenOverride && !frontIsAI && frontIsFullscreen()
         guard full != hiddenForFullscreen else { return }
         hiddenForFullscreen = full
         if full {

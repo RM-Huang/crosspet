@@ -159,7 +159,7 @@ namespace CrossPet
                 core.Settings.AreDevToolsEnabled = false;
                 core.Settings.IsZoomControlEnabled = false;
                 core.Settings.IsStatusBarEnabled = false;
-                web.ZoomFactor = Scale;
+                web.ZoomFactor = Scale * zoomFix;
                 // 网页进程 / 浏览器进程崩溃（显卡驱动、系统睡眠醒来、内存不够时偶尔会）：不处理的话她就一直停住，
                 // 之后每次调网页都报「控件已失效」
                 core.ProcessFailed += (_, a) => Window.Dispatcher.BeginInvoke(new Action(() => _ = RecoverWeb(a.ProcessFailedKind)));
@@ -168,7 +168,7 @@ namespace CrossPet
                     ready = false;
                     if (!a.IsSuccess) { Store.Log("桌宠页面加载失败: " + a.WebErrorStatus); return; }
                     LoadCharacters();
-                    await core.ExecuteScriptAsync($"init({ManifestJson}); setCharacter({Q(current)}, true); setAuraMode({Q(AuraMode)}); setShowName({(ShowName ? "true" : "false")}); setEggsEnabled({(EggsEnabled ? "true" : "false")}); setPowerSave({(PowerSave ? "true" : "false")}); setQuotaAggregate({(QuotaAggregate ? "true" : "false")}); setCodexResets({(CodexResets ? "true" : "false")})");
+                    await core.ExecuteScriptAsync($"init({ManifestJson}); setCharacter({Q(current)}, true); setAuraMode({Q(AuraMode)}); setShowName({(ShowName ? "true" : "false")}); setEggsEnabled({(EggsEnabled ? "true" : "false")}); setPowerSave({(PowerSave ? "true" : "false")}); setQuotaAggregate({(QuotaAggregate ? "true" : "false")}); setCodexResets({(CodexResets ? "true" : "false")}); setPeakStyle({Q(PeakStyle)}); setPeakSkins({Store.Json.Serialize(PeakSkins)})");
                     if (Store.Settings.TryGetValue("dock", out var dk) && dk is string side && EdgeDockEnabled) After(1500, () => SetDock(side));   // 上次是贴着边的
                     // 刚更新完（上次打开的是别的版本）：让她说一声
                     var last = Store.Settings.TryGetValue("lastVersion", out var lv) ? lv as string : null;
@@ -198,6 +198,11 @@ namespace CrossPet
                         if (!(Store.Json.DeserializeObject(a.WebMessageAsJson) is Dictionary<string, object> m)) return;
                         // 「新功能」卡片点了「去看看」：打开设置停在「新功能」页
                         if (m.TryGetValue("openSettings", out var tab) && tab is string t) { OpenSettings(t); return; }
+                        // 按时段换衣服（网页层判断好了时段）：只换这个角色已有的衣服，不切换当前角色（和 macOS 的 handlePet 一致）
+                        if (m.TryGetValue("wear", out var wv) && wv is Dictionary<string, object> w && w.TryGetValue("id", out var wi) && wi is string wid
+                            && w.TryGetValue("skin", out var ws) && ws is string wskin && Characters().Any(c => c.id == wid)
+                            && (wskin == "" || (Store.SkinChoices.TryGetValue(wid, out var wl) && wl.Any(x => x.id == wskin))))
+                        { Wear(wid, wskin); return; }
                         if (imageErrors >= 5 || !m.TryGetValue("imageError", out var src)) return;
                         imageErrors++;
                         Store.Log($"立绘加载失败: {src}");

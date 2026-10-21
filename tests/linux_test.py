@@ -104,6 +104,32 @@ class LinuxTests(unittest.TestCase):
         (self.store.data / "ai-autostart-off").write_text("1")
         self.assertIn("设置里关掉", self.hook())
 
+    def test_hook_data_paths_keep_qwen_and_autostart_together(self):
+        # 默认路径、XDG 路径和显式覆盖都要同时用于找角色和读自动启动开关。
+        for mode in ("default", "xdg", "override"):
+            with self.subTest(mode=mode):
+                root = self.root / mode
+                env = dict(os.environ, HOME=str(root / "home"), CROSSPET_STATE_DIR=str(root / "state"))
+                env.pop("CROSSPET_DATA_DIR", None)
+                env.pop("XDG_DATA_HOME", None)
+                data = root / "home/.local/share/crosspet"
+                if mode in ("xdg", "override"):
+                    env["XDG_DATA_HOME"] = str(root / "xdg data")
+                    data = root / "xdg data/crosspet"
+                if mode == "override":
+                    data = root / "custom data"
+                    env["CROSSPET_DATA_DIR"] = str(data)
+                data.mkdir(parents=True)
+                (data / "ai-autostart-off").write_text("1")
+                (data / "characters").symlink_to(ROOT / "characters")
+                event = {"hook_event_name": "SessionStart", "session_id": mode, "model": "qwen3.8-max"}
+                result = subprocess.run(
+                    [sys.executable, str(ROOT / "integrations/crosspet-hook.py"), "qwen"],
+                    input=json.dumps(event), text=True, capture_output=True, env=env, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(read_json(root / "state/qwen-host.json")["character"], "qwen")
+                self.assertIn("设置里关掉", (root / "state/autostart.txt").read_text())
+
     def test_linux_single_instance_uses_lock_not_pid(self):
         with (self.store.data / "instance.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

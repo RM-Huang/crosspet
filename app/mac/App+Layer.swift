@@ -6,13 +6,18 @@ import WebKit
 extension App {
     // MARK: 显示层级
     // always：始终在最上层；ai：前台是 AI 应用、AI 等你回答、刚干完活时在最上层，其他时候是普通窗口（会被挡住）；
-    // normal：普通窗口。全屏时隐藏用 macOS 自己的机制：不允许出现在全屏程序的空间里
+    // normal：普通窗口。全屏时隐藏见 checkFullscreen（AI 程序全屏时照常显示）
     var layerMode: String { defaults.string(forKey: "layer") ?? "always" }
     var hideInFullscreen: Bool { defaults.object(forKey: "hideFullscreen") as? Bool ?? true }
 
+    /// 前台是不是某个角色对应的 AI 程序（角色 character.json 的 apps，或 WorkBuddy / ZCode 这类多模型宿主）
+    var frontIsAI: Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return false }
+        return appToCharacter[front] != nil || hostApp(front) != nil
+    }
+
     var aiActive: Bool {
-        if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-           appToCharacter[front] != nil || hostApp(front) != nil { return true }
+        if frontIsAI { return true }
         let now = Date()
         return lastPose.values.contains { p in
             let age = now.timeIntervalSince(p.at)

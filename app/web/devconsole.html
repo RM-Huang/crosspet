@@ -123,6 +123,7 @@ textarea { min-height: 300px; font: 12px/1.5 ui-monospace, Menlo, monospace; }
   </section>
 </main>
 
+<script src="peak-hours.js"></script>
 <script>
 const $ = id => document.getElementById(id)
 // macOS：WKWebView 的 webkit.messageHandlers；Windows：WebView2 的 chrome.webview
@@ -317,19 +318,28 @@ const SCENES = [
     run: async (id) => { const s = await petStatus(), saved = s.quota[id] ?? null, now = Date.now() / 1000
       const q = u => ({ text: `测试 本周 剩余 ${100 - u}%`, low: false, windows: [{ label: '本周', used: u, reset: now + 400000 }] })
       pet(`setQuota('gpt', ${J(q(70))})`); await wait(500); pet(`setQuota('gpt', ${J(q(3))})`); await wait(8000); pet(`setQuota('gpt', ${J(saved)})`) } },
-  { id: 'resets', name: 'Codex 重置提醒（6 档）', only: (c, id) => id === 'gpt', exp: '不联网，用假数据依次问她「会重置吗？」：先<b>查手机</b>，再按档回答——<b>官方已宣布</b>（摇铃，额度下方多一行「🔔 官方已宣布重置」）→ <b>85%</b>（期待）→ <b>50%</b>（半信半疑）→ <b>10%</b>（摇头）→ <b>没风声</b>（摇头，说上次是几天前）→ <b>连不上</b>（摇头）。每档约 10 秒，演完恢复真实设置',
+  { id: 'resets', name: 'Codex 重置提醒（7 档）', only: (c, id) => id === 'gpt', exp: '不联网，用假数据依次问她「会重置吗？」：先<b>查手机</b>，再按档回答——<b>官方已宣布</b>（摇铃，额度下方多一行「🔔 官方已宣布重置」）→ <b>刚重置过</b>（庆祝，额度下方「✨ 2 小时前刚重置过」）→ <b>85%</b>（期待）→ <b>50%</b>（半信半疑）→ <b>10%</b>（摇头）→ <b>没风声</b>（摇头，说上次是几天前）→ <b>连不上</b>（摇头）。每档约 10 秒，演完恢复真实设置',
     run: async (id, prog) => {
       const iso = ms => new Date(Date.now() + ms).toISOString()
       const src = { type: 'x_post', author: 'thsottiaux', url: 'https://x.com' }
-      const watch = chance => ({ level: chance >= 70 ? 'strong' : 'elevated', reset_chance_percent: chance, forecast_window: 'next 48h', observed_at: iso(-3600e3), expires_at: iso(86400e3), text: '', source: src })
+      const watch = chance => ({ level: chance >= 70 ? 'strong' : 'elevated', reset_chance_percent: chance, forecast_window: 'within 24h', observed_at: iso(-3600e3), expires_at: iso(86400e3), text: '', source: src })
       const data = (extra = {}) => ({ data: { latest_reset: null, scheduled_reset: null, active_watch: null, stats: { total: 61, last_reset_at: iso(-1.4 * 86400e3), days_since_last: 1.4, avg_interval_days: 6.5 }, ...extra }, meta: { api_version: 'v1' } })
       const tiers = [
         ['官方已宣布', data({ scheduled_reset: { id: 'dev', status: 'scheduled', reset_type: 'regular', announced_at: iso(-600e3), scheduled_for: iso(20 * 3600e3), text: '', source: src } })],
+        ['刚重置过', data({ latest_reset: { id: 'dev-r', reset_type: 'regular', announced_at: iso(-2 * 3600e3), text: '', source: src } })],
         ['85%', data({ active_watch: watch(85) })], ['50%', data({ active_watch: watch(50) })], ['10%', data({ active_watch: watch(10) })],
         ['没风声', data()], ['连不上', null],
       ]
       for (const [name, d] of tiers) { prog(name); pet(`devResetsPlay(${J(d)})`); await wait(10500) }
       pet('devResetsDone()'); prog('') } },
+  { id: 'peak', name: '峰谷换装', only: (c, id) => !!window.PeakHours?.RULES[id], exp: '把时间挪到下一个工作日 <b>8:59:50</b>：额度下的时间条竖线跳到 9 点前，10 秒后进入<b>高峰</b>——设置里选了「高峰穿」的话冒一团烟换上、说一句；再挪到 <b>11:59:50</b>，进入<b>空闲</b>换「空闲穿」的那件。没在设置里选衣服就只看时间条。不改你的设置，演完换回原来的衣服',
+    run: async (id, prog) => {
+      const day = 86400e3, bj = 8 * 3600e3, mid = Math.floor((Date.now() + bj) / day) * day - bj
+      let d = 1; while (![1, 2, 3, 4, 5].includes(new Date(mid + d * day + bj).getUTCDay())) d++
+      const at = h => mid + d * day + h * 3600e3 - 10e3
+      prog('高峰前 10 秒'); pet(`devPeakPlay(${at(9)})`); await wait(16000)
+      prog('空闲前 10 秒'); pet(`devPeakPlay(${at(12)})`); await wait(16000)
+      pet('devPeakDone()'); prog('') } },
   { id: 'feast', name: 'DeepSeek 充值', only: (c, id) => id === 'deepseek', exp: '余额变多 → <b>feast</b>：抱着比脑袋还大的饭碗开吃 + 彩纸；之后恢复真实余额',
     run: async (id) => { const s = await petStatus(), saved = s.quota[id] ?? null
       pet(`setQuota('deepseek', ${J({ text: '余额 ¥6.00', low: false, balance: 6 })})`); await wait(500)

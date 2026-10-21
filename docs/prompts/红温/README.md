@@ -1,4 +1,4 @@
-# 红温：甩她、炸毛、哄好（42 张）
+# 红温：甩她、炸毛、哄好（56 张）
 
 甩她（按住快速来回拖），红温值一档档上去：不耐烦 → 鼓脸 → 红温；红温后她别过身去不理你；这时摸她就是哄，摸几下消气、害羞地原谅你。被甩时还会晕。
 蒸汽、发红、发抖是 App 用代码画的，图里**只画脸红**，不画蒸汽和符号。
@@ -23,4 +23,6 @@
 | 4 | [04-gemini-红温.md](04-gemini-红温.md) | 7 |
 | 5 | [05-glm-红温.md](05-glm-红温.md) | 7 |
 | 6 | [06-卫衣deepseek-红温.md](06-卫衣deepseek-红温.md)（皮肤，放 `characters/deepseek-hoodie/raw/`） | 7 |
+| 7 | [07-睡衣deepseek-红温.md](07-睡衣deepseek-红温.md)（皮肤，放 `characters/deepseek-pajamas/raw/`） | 7 |
+| 8 | [08-冬装deepseek-红温.md](08-冬装deepseek-红温.md)（皮肤，放 `characters/deepseek-winter/raw/`） | 7 |
 
