@@ -18,8 +18,23 @@ DEFAULTS = {
     "hideFullscreen": True, "edgeDock": True, "powerSave": False,
     "gptQuota": False, "agyQuota": False, "dsQuota": True,
     "quotaAggregate": False, "codexResets": False, "aiAutostart": True,
+    "peakStyle": "bar", "peakSkins": {},
     "hideHotkey": "ctrl-alt-p", "layer": "always", "names": {}, "skins": {},
 }
+
+
+def clean_peak_skins(value):
+    """和 macOS / Windows 一样：空字符串代表原版，缺少某个时段代表不换。"""
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for id, entry in value.items():
+        if not isinstance(id, str) or not isinstance(entry, dict):
+            continue
+        skins = {key: entry[key] for key in ("peak", "valley") if isinstance(entry.get(key), str)}
+        if skins:
+            result[id] = skins
+    return result
 
 
 def read_json(path, fallback=None):
@@ -66,6 +81,9 @@ class Store:
         for key in ("names", "skins"):
             if not isinstance(self.settings[key], dict):
                 self.settings[key] = {}
+        if self.settings["peakStyle"] not in ("bar", "text", "off"):
+            self.settings["peakStyle"] = "bar"
+        self.settings["peakSkins"] = clean_peak_skins(self.settings["peakSkins"])
         self.stamps = {}
 
     def prepare(self):

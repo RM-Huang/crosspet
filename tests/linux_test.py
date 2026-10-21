@@ -5,16 +5,18 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app/linux"))
 from core import Store, desktop_entry, query_codex, read_json, write_json
+from main import Pet
 spec = importlib.util.spec_from_file_location("linux_integrate", ROOT / "tools/integrate.py")
 integrate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(integrate)
@@ -185,6 +187,117 @@ class LinuxTests(unittest.TestCase):
         self.assertEqual(Store().settings["size"], 1.3)
         write_json(self.store.config / "settings.json", {"size": "bad", "textSize": -3})
         self.assertEqual(Store().settings["size"], 1)
+
+    def settings_pet(self):
+        # 使用真实设置与角色目录，仅替换 GUI 边界；无需启动 GTK。
+        (self.store.data / "characters").symlink_to(ROOT / "characters")
+        pet = Pet.__new__(Pet)
+        pet.store, pet.s = self.store, self.store.settings
+        pet.manifest, pet.choices = self.store.manifest()
+        pet.ids = [c["id"] for c in pet.choices]
+        pet.current, pet.dock = "gpt", None
+        pet.integrated, pet.plugins = [], []
+        pet.hotkey_failed, pet.quota_note = False, ""
+        pet.call, pet.push_settings, pet.apply_layer = Mock(), Mock(), Mock()
+        return pet
+
+    def test_peak_settings_defaults_and_saved_values_are_validated(self):
+        self.assertEqual(self.store.settings["peakStyle"], "bar")
+        self.assertEqual(self.store.settings["peakSkins"], {})
+        write_json(self.store.config / "settings.json", {
+            "peakStyle": "unknown",
+            "peakSkins": {"deepseek": {"peak": "", "valley": "deepseek-pajamas", "other": "bad"},
+                          "glm": {"peak": None, "valley": False}, "gpt": []}})
+        loaded = Store()
+        self.assertEqual(loaded.settings["peakStyle"], "bar")
+        self.assertEqual(loaded.settings["peakSkins"], {"deepseek": {"peak": "", "valley": "deepseek-pajamas"}})
+        loaded.save()
+        self.assertEqual(Store().settings["peakSkins"], loaded.settings["peakSkins"])
+        for bad in (None, [], "bad"):
+            write_json(self.store.config / "settings.json", {"peakSkins": bad})
+            self.assertEqual(Store().settings["peakSkins"], {})
+
+    def test_peak_style_setting_reaches_web_and_survives_restart(self):
+        pet = self.settings_pet()
+        for style in ("text", "off", "bar"):
+            pet.settings_message({"cmd": "set", "key": "peakStyle", "value": style})
+            self.assertEqual(Store().settings["peakStyle"], style)
+            self.assertEqual(pet.settings_state()["peakStyle"], style)
+            pet.call.assert_any_call("setPeakStyle", style)
+        pet.call.reset_mock()
+        for bad in ("unknown", None, True, {}):
+            pet.settings_message({"cmd": "set", "key": "peakStyle", "value": bad})
+        pet.call.assert_not_called()
+        self.assertEqual(Store().settings["peakStyle"], "bar")
+
+    def test_peak_outfit_changes_are_synced_without_reset_from_other_settings(self):
+        pet = self.settings_pet()
+        value = {"deepseek": {"peak": "", "valley": "deepseek-pajamas", "ignored": True},
+                 "glm": {"peak": 123}}
+        expected = {"deepseek": {"peak": "", "valley": "deepseek-pajamas"}}
+        pet.settings_message({"cmd": "set", "key": "peakSkins", "value": value})
+        pet.call.assert_any_call("setPeakSkins", expected)
+        self.assertEqual(Store().settings["peakSkins"], expected)
+        self.assertEqual(pet.settings_state()["peakSkins"], expected)
+        self.assertEqual(pet.s["skins"], {})  # 改配置本身不立刻换装。
+        pet.call.reset_mock()
+        for key, value in (("showName", False), ("peakStyle", "text"), ("powerSave", True)):
+            pet.settings_message({"cmd": "set", "key": key, "value": value})
+        self.assertNotIn("setPeakSkins", [c.args[0] for c in pet.call.call_args_list])
+        pet.settings_message({"cmd": "set", "key": "peakSkins", "value": {}})
+        pet.call.assert_any_call("setPeakSkins", {})
+        self.assertEqual(Store().settings["peakSkins"], {})
+
+    def test_automatic_outfit_uses_existing_skin_without_switching_character(self):
+        pet = self.settings_pet()
+        pet.pet_message({"wear": {"id": "deepseek", "skin": "deepseek-pajamas"}})
+        self.assertEqual(pet.current, "gpt")
+        self.assertEqual(Store().settings["skins"]["deepseek"], "deepseek-pajamas")
+        self.assertEqual(pet.manifest["characters"]["deepseek"]["skin"], "deepseek-pajamas")
+        pet.call.assert_any_call("refreshLook", "deepseek")
+        pet.call.reset_mock()
+        for id, skin in (("deepseek", "deepseek-pajamas"), ("deepseek", "gpt-onesie"),
+                         ("deepseek", None), ("missing", ""), (None, "")):
+            pet.pet_message({"wear": {"id": id, "skin": skin}})
+        pet.call.assert_not_called()
+        pet.current = "deepseek"
+        pet.pet_message({"wear": {"id": "deepseek", "skin": ""}})
+        self.assertNotIn("deepseek", Store().settings["skins"])
+        self.assertEqual(pet.manifest["characters"]["deepseek"].get("skin", ""), "")
+        pet.call.assert_any_call("refreshLook", "deepseek")
+        pet.settings_message({"cmd": "skin", "id": "gpt", "skin": "gpt-onesie"})
+        self.assertEqual(pet.current, "gpt")
+        self.assertEqual(Store().settings["skins"]["gpt"], "gpt-onesie")
+
+    def test_qwen_settings_entry_installs_and_removes_real_linux_hook(self):
+        pet = self.settings_pet()
+        pet.notice, pet.refresh_integrations = Mock(), Mock()
+        pet.background = lambda work, done: done(work(), None)
+        shutil.copy2(ROOT / "integrations/crosspet-hook.py", self.store.data / "crosspet-hook.py")
+        settings = self.root / "home/.qwen/settings.json"
+        original = {"theme": "custom", "hooks": {"Stop": [{"hooks": [{"command": "echo keep-me"}]}]}}
+        write_json(settings, original)
+        (settings.parent / "projects").mkdir()  # 模拟 Qwen 自己留下的目录，不能只有 CrossPet 会写的 settings.json。
+        entry = next(i for i in pet.settings_state()["integrations"] if i["id"] == "qwen")
+        self.assertFalse(entry["installed"])
+        self.assertIsNone(entry["lastSeen"])
+        with patch.dict(os.environ, {"HOME": str(settings.parent.parent)}):
+            pet.settings_message({"cmd": "integrate", "target": "qwen", "action": "install"})
+            installed = read_json(settings)
+            command = installed["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            (self.store.data / "ai-autostart-off").write_text("1")
+            event = {"hook_event_name": "PreToolUse", "session_id": "linux-qwen", "model": "qwen3.8-max", "tool_name": "read_file"}
+            result = subprocess.run(shlex.split(command), input=json.dumps(event), text=True, capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(read_json(self.store.state / "qwen-state.json")["pose"], "reading")
+            self.assertEqual(pet.host_character("qwen"), "qwen")
+            pet.integrated = ["qwen"]
+            entry = next(i for i in pet.settings_state()["integrations"] if i["id"] == "qwen")
+            self.assertTrue(entry["installed"])
+            self.assertIsNotNone(entry["lastSeen"])
+            pet.settings_message({"cmd": "integrate", "target": "qwen", "action": "uninstall"})
+        self.assertEqual(read_json(settings), original)
+        self.assertEqual(pet.refresh_integrations.call_count, 2)
 
     def test_codex_protocol_and_errors(self):
         fake = str(ROOT / "tests/fake_codex.py")

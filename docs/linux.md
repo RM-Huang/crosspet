@@ -48,10 +48,13 @@ sudo apt install python3 python3-gi python3-gi-cairo \
 ```bash
 python3 tools/integrate.py install codex
 python3 tools/integrate.py install claude-hooks
+python3 tools/integrate.py install qwen
 python3 tools/integrate.py status
 ```
 
 先安装或启动一次桌宠，以部署钩子脚本。接入后需新建 AI 会话；Codex 的钩子仍须在宿主里信任。只接入用户选中的宿主，安装桌宠本身不会修改任何 AI 配置。
+
+Qwen Code 可在「设置 → 接入 AI」里接入或撤销，并显示接入状态和最近事件时间；先安装并运行一次 Qwen Code。接入保留其原有设置和其他钩子，按当前模型匹配已安装的角色。
 
 仍使用原有的 JSON 状态协议和事件解析；终端中的 AI 工作事件会自动切换角色。前台应用跟随使用 X11 的 WM_CLASS，可在 `~/.config/crosspet/apps.json` 增加精确映射，例如：
 
@@ -67,6 +70,7 @@ python3 tools/integrate.py status
 - 拖到屏幕外侧边缘松手即收起；鼠标停在露出部分会探头，移开后缩回。AI 有新工作时出来、恢复空闲后收回。相邻显示器之间的接缝不吸附。
 - 原有立绘、皮肤、台词、动画、彩蛋和多会话表现。
 - 共享设置页与开发者控制台；角色改名、人物 / 文字缩放及设置持久化。
+- 峰谷时段支持时间条、文字或关闭；「高峰穿 / 空闲穿」配置会保存并在启动时恢复。按共享网页的北京时间规则自动换装，只换已有皮肤；后台角色换装不会切走当前角色。修改配置从下一时段生效，修改其他设置不重置换装记录。
 - 前台 AI 应用跟随、三种窗口层级、同屏全屏时隐藏。
 - Ctrl+Alt+P 隐藏 / 显示；可改为 Ctrl+Alt+H，检测快捷键占用。
 - 托盘菜单（需要 Ayatana AppIndicator 和桌面托盘支持；Ubuntu 默认桌面通常已带托盘扩展）。缺少托盘时仍可通过右键、快捷键和 `--show` 操作。
@@ -100,7 +104,7 @@ Codex CLI 必须在桌宠的 PATH 中。应用菜单启动时若找不到 npm / 
 不依赖桌面的回归：
 
 ```bash
-python3 -m unittest tests.linux_test tests.integrate_test tests.hook_stdin_test
+python3 -m unittest tests.linux_test tests.integrate_test tests.hook_stdin_test tests.hook_test tests.codex_turn_test
 node --test tests/*.test.js tests/*.test.mjs
 ```
 

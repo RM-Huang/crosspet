@@ -14,7 +14,7 @@ import threading
 import time
 import traceback
 
-from core import ROOT, DEFAULTS, Store, desktop_entry, query_codex, read_json, write_json
+from core import ROOT, DEFAULTS, Store, clean_peak_skins, desktop_entry, query_codex, read_json, write_json
 
 
 def dependencies():
@@ -187,6 +187,7 @@ class Pet:
         self.call("init", self.manifest)
         self.switch(self.current if self.current in self.ids else self.ids[0], True)
         self.apply_settings()
+        self.call("setPeakSkins", self.s["peakSkins"])
         self.apply_size("corner")
         self.store.stamps.clear()
         self.foreground_changed()
@@ -210,7 +211,8 @@ class Pet:
     def apply_settings(self):
         for key, name in (("showName", "setShowName"), ("aura", "setAuraMode"),
                           ("eggs", "setEggsEnabled"), ("powerSave", "setPowerSave"),
-                          ("quotaAggregate", "setQuotaAggregate"), ("codexResets", "setCodexResets")):
+                          ("quotaAggregate", "setQuotaAggregate"), ("codexResets", "setCodexResets"),
+                          ("peakStyle", "setPeakStyle")):
             self.call(name, self.s[key])
         flag = self.store.data / "ai-autostart-off"
         if self.s["aiAutostart"]:
@@ -571,6 +573,29 @@ class Pet:
     def pet_message(self, msg):
         if isinstance(msg.get("openSettings"), str):
             self.open_page("settings", msg["openSettings"])
+        wear = msg.get("wear")
+        if isinstance(wear, dict):
+            self.wear(wear.get("id"), wear.get("skin"))
+
+    def wear(self, id, skin):
+        """只换这个角色已有的衣服；峰谷自动换装不能切换当前角色。"""
+        if not isinstance(id, str) or id not in self.ids or not isinstance(skin, str):
+            return False
+        choice = next(c for c in self.choices if c["id"] == id)
+        if skin and not any(s["id"] == skin for s in choice.get("skins", [])):
+            return False
+        if self.s["skins"].get(id, "") == skin:
+            return True
+        if skin:
+            self.s["skins"][id] = skin
+        else:
+            self.s["skins"].pop(id, None)
+        self.store.save()
+        self.manifest, self.choices = self.store.manifest()
+        self.call("init", self.manifest)
+        self.call("refreshLook", id)
+        self.push_settings()
+        return True
 
     def open_page(self, kind, tab=None):
         if kind in self.pages:
@@ -619,7 +644,8 @@ class Pet:
         )
         targets = [("claude-hooks", "Claude Code 标准钩子"), ("claude-mod", "Claude Code 增强版 mod"),
                    ("codex", "Codex"), ("deepseek", "DeepSeek Harness"), ("gemini", "Gemini CLI"),
-                   ("antigravity", "Antigravity"), ("workbuddy", "WorkBuddy"), ("zcode", "ZCode"), ("hermes", "Hermes Agent")]
+                   ("antigravity", "Antigravity"), ("workbuddy", "WorkBuddy"), ("zcode", "ZCode"), ("hermes", "Hermes Agent"),
+                   ("qwen", "Qwen Code（阿里）")]
         state["integrations"] = []
         for id, label in targets:
             key = {"claude-hooks": "claude", "codex": "gpt"}.get(id, id)
@@ -689,9 +715,10 @@ class Pet:
         elif cmd in ("skin", "rename") and msg.get("id") in self.ids:
             id = msg["id"]
             if cmd == "skin":
-                self.s["skins"][id] = str(msg.get("skin", ""))
-            else:
-                self.s["names"][id] = str(msg.get("name", ""))[:40].strip()
+                if self.wear(id, msg.get("skin", "")):
+                    self.switch(id)
+                return
+            self.s["names"][id] = str(msg.get("name", ""))[:40].strip()
             self.store.save()
             self.manifest, self.choices = self.store.manifest()
             self.call("init", self.manifest)
@@ -731,11 +758,13 @@ class Pet:
         elif key in DEFAULTS and isinstance(DEFAULTS[key], bool):
             if not isinstance(value, bool) or key == "agyQuota":
                 return
-        elif key in ("aura", "layer", "hideHotkey"):
+        elif key in ("aura", "layer", "hideHotkey", "peakStyle"):
             allowed = {"aura": ("auto", "on", "off"), "layer": ("always", "ai", "normal"),
-                       "hideHotkey": ("off", "ctrl-alt-p", "ctrl-alt-h")}
+                       "hideHotkey": ("off", "ctrl-alt-p", "ctrl-alt-h"), "peakStyle": ("bar", "text", "off")}
             if value not in allowed[key]:
                 return
+        elif key == "peakSkins":
+            value = clean_peak_skins(value)
         elif key == "login":
             if not isinstance(value, bool):
                 return
@@ -766,6 +795,9 @@ class Pet:
             else:
                 self.call("setCodexQuota", None)
         self.store.save()
+        if key == "peakSkins":
+            # 网页会将当前时段标记为已处理，只在改换装配置时调用，避免其他设置吞掉待换装请求。
+            self.call("setPeakSkins", value)
         self.apply_settings()
         self.push_settings()
 

@@ -9,7 +9,7 @@ import time
 import gi
 gi.require_version("WebKit2", "4.1")
 from gi.repository import GLib, Gtk, WebKit2, Gdk
-from core import ROOT, write_json
+from core import ROOT, Store, write_json
 
 
 class Rectangle(C.Structure):
@@ -119,11 +119,47 @@ class Smoke:
 
     def settings(self):
         web = self.pet.pages["settings"][1]
-        self.evaluate("({platform:state.platform,characters:state.characters.length})", self.settings_result, web)
+        self.evaluate("""({platform:state.platform,characters:state.characters.length,
+            peakStyle:document.querySelector('#peakStyle .on')?.dataset.v,
+            qwen:state.integrations.find(i=>i.id==='qwen'),
+            qwenVisible:document.getElementById('integrations').textContent.includes('Qwen Code')})""", self.settings_result, web)
 
     def settings_result(self, value):
         self.expect("shared_settings_page", value["platform"] == "linux" and value["characters"] >= 5, value)
+        self.expect("peak_style_default_in_settings", value["peakStyle"] == "bar", value)
+        self.expect("qwen_settings_entry", bool(value.get("qwen")) and value["qwenVisible"], value)
         self.snapshot("settings.png", self.pet.pages["settings"][1])
+        self.evaluate("""(() => {
+            document.querySelector('#peakStyle [data-v=text]').click();
+            const c = state.characters.find(c=>c.id==='deepseek');
+            const sel = [...document.querySelectorAll('#peakOutfits select')].find(s=>s.getAttribute('aria-label') === c.name+'高峰穿');
+            sel.value = 'deepseek-pajamas'; sel.dispatchEvent(new Event('change')); return true;
+        })()""", lambda _: self.later(400, self.peak_settings), self.pet.pages["settings"][1])
+
+    def peak_settings(self):
+        expected = {"deepseek": {"peak": "deepseek-pajamas"}}
+        saved = Store().settings
+        self.expect("peak_settings_persisted", saved["peakStyle"] == "text" and saved["peakSkins"] == expected, saved)
+        self.evaluate("({style:peakStyle,skins:peakSkins,current:charId,worn:manifest.characters.deepseek.skin || ''})", self.peak_settings_result)
+
+    def peak_settings_result(self, value):
+        self.expect("peak_settings_to_pet_web", value["style"] == "text" and
+                    value["skins"] == {"deepseek": {"peak": "deepseek-pajamas"}} and value["worn"] == "", value)
+        # 使用网页真实的峰谷判定和 wear 桥接；模拟周一高峰，后台角色应换衣但不能抢走当前角色。
+        self.evaluate("""devPeakApplied = {}; devPeakShift = Date.parse('2026-10-19T10:00:00+08:00') - Date.now();
+            checkPeakOutfits(); true""", lambda _: self.later(400, self.peak_worn))
+
+    def peak_worn(self):
+        self.expect("peak_outfit_persisted", Store().settings["skins"].get("deepseek") == "deepseek-pajamas")
+        self.evaluate("({current:charId,worn:manifest.characters.deepseek.skin})", self.peak_worn_result)
+
+    def peak_worn_result(self, value):
+        self.expect("peak_outfit_bridge_keeps_current_character", value["current"] == "gpt" and
+                    value["worn"] == "deepseek-pajamas", value)
+        self.pet.set_setting("peakSkins", {})
+        self.pet.pet_message({"wear": {"id": "deepseek", "skin": ""}})
+        self.pet.set_setting("peakStyle", "bar")
+        self.evaluate("devPeakShift = 0; devPeakApplied = null; true", lambda _: None)
         self.evaluate("post({cmd:'set',key:'size',value:1.25}); true", lambda _: self.later(800, self.resized),
                       self.pet.pages["settings"][1])
 
