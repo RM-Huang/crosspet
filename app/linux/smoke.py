@@ -86,19 +86,50 @@ class Smoke:
             lib.XDestroyImage(image)
         self.expect("non_focusable_window", not self.pet.window.get_accept_focus())
         self.snapshot("pet.png")
+        self.hook_event("PreToolUse", "linux-smoke", tool_name="Bash")
+        self.later(1200, lambda: self.evaluate("({state:charState.gpt,status:devStatus()})", self.event_result))
+
+    def hook_event(self, name, sid, **extra):
         env = dict(os.environ, CROSSPET_STATE_DIR=str(self.pet.store.state), CROSSPET_DATA_DIR=str(self.pet.store.data))
-        event = {"hook_event_name": "PreToolUse", "session_id": "linux-smoke",
-                 "tool_name": "Bash", "cwd": "/tmp"}
+        event = {"hook_event_name": name, "session_id": sid, "cwd": "/tmp", **extra}
         result = subprocess.run(["/usr/bin/python3", str(ROOT / "integrations/crosspet-hook.py"), "gpt"],
                                 input=json.dumps(event), text=True, capture_output=True, env=env, timeout=5)
-        self.expect("real_hook_process", result.returncode == 0, result.stderr)
-        self.later(1200, lambda: self.evaluate("({state:charState.gpt,status:devStatus()})", self.event_result))
+        self.expect("real_hook_" + name, result.returncode == 0 and not result.stdout and not result.stderr, result.stderr)
 
     def event_result(self, value):
         self.expect("hook_to_web_state", value["state"]["pose"] == "running" and value["status"]["charId"] == "gpt", value)
         self.expect("x11_input_shape", self.input_rectangles() > 0 and bool(self.pet.rects), self.pet.rects)
-        self.pet.toggle()
-        self.later(350, self.hidden)
+        # 真实进程写文件，再经原生轮询进入 WebKit；同时检查会话表和最终显示。
+        self.session_checks = iter([
+            ("permission_wait", "PermissionRequest", "linux-smoke", {}, "asking", False,
+             {"linux-smoke": "asking"}),
+            ("other_session_keeps_wait", "PreToolUse", "linux-smoke-other", {"tool_name": "apply_patch"}, "asking", True,
+             {"linux-smoke": "asking", "linux-smoke-other": "writing"}),
+            ("end_one_preserves_other", "SessionEnd", "linux-smoke", {}, "writing", False,
+             {"linux-smoke-other": "writing"}),
+            ("remaining_session_permission", "PermissionRequest", "linux-smoke-other", {}, "asking", False,
+             {"linux-smoke-other": "asking"}),
+            ("permission_recovers", "PostToolUse", "linux-smoke-other", {}, "thinking", False,
+             {"linux-smoke-other": "thinking"}),
+            ("last_session_ends", "SessionEnd", "linux-smoke-other", {}, "sleeping", False, {}),
+            ("late_tool_stays_closed", "PreToolUse", "linux-smoke-other", {"tool_name": "Bash"}, "sleeping", False, {}),
+        ])
+        self.session_step()
+
+    def session_step(self):
+        step = next(self.session_checks, None)
+        if step is None:
+            self.pet.toggle()
+            self.later(350, self.hidden)
+            return
+        check, name, sid, extra, pose, multi, sessions = step
+        self.hook_event(name, sid, **extra)
+        def result(value):
+            actual = {sid: entry["pose"] for sid, entry in value["sessions"].items()}
+            self.expect(check, value["pose"] == pose and value["state"]["pose"] == pose
+                        and value["multi"] == multi and actual == sessions, value)
+            self.session_step()
+        self.later(650, lambda: self.evaluate("({state:charState.gpt,pose,multi:!!multi,sessions:sessions.gpt})", result))
 
     def input_rectangles(self):
         xext = C.CDLL("libXext.so.6")

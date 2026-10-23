@@ -1106,7 +1106,7 @@ function refreshMulti() {
     const bad = kind === 'error' || e.pose === 'oops'
     if (bad && !c.el.classList.contains('error')) c.el.classList.add('error')
     if (!bad) c.el.classList.remove('error')
-    setCardPose(c, kind === 'done' ? 'happy' : e.pose)
+    setCardPose(c, kind === 'done' ? 'happy' : (e.after || e.pose))
   })
   const extra = multi.order.length - shown.length
   $('more').textContent = extra > 0 ? `+${extra}` : ''
@@ -1187,13 +1187,14 @@ function endMulti() {
   shownAt = 0
   // 回到只剩的那一个对话的样子（没有就是待机）
   const left = Object.values(currentSessions()).filter(e => sessionKind(e, Date.now() / 1000) === 'work' || sessionKind(e, Date.now() / 1000) === 'ask')
-  show(left.length ? left[0].pose : 'idle', true)
+  show(left.length ? left[0].pose : (charState[charId]?.event === 'SessionEnd' ? 'sleeping' : 'idle'), true)
   watchStuck()
 }
 
 function applyCharState(id, s) {
   if (id === 'current') id = charId   // 多模型宿主里没有对应角色的模型（WorkBuddy 的混元、Kimi……）：由当前角色来演
   const own = id                      // 事件原本属于哪家 AI：先按它记下状态，切回那家的角色时看到的才是最新的
+  const previous = charState[standsIn(id) ? charId : id]
   charState[own] = s
   if (standsIn(id)) id = charId       // 代演（reactTo）：别家 AI 的状态当成她自己的（多个会话同时干活时，由 refreshMulti 合并）
   charState[id] = s
@@ -1216,7 +1217,8 @@ function applyCharState(id, s) {
     return
   }
   if (ev === 'PostToolUse' || ev === 'AfterTool' || ev === 'SubagentStop') {
-    if (s.pose === 'oops') show('oops')
+    if (s.pose === 'oops') show('oops', previous?.pose === 'asking')
+    else if (previous?.pose === 'asking') show('thinking', true)   // 授权等待结束，不再延迟显示恢复
     else thinkTimer = setTimeout(() => show('thinking'), BACK_TO_THINKING)
   } else if (ev === 'UserPromptSubmit' || ev === 'BeforeAgent') {
     // 刚出错 / 被打断后你又发了消息（多半是在纠正她）：有 correctedPose 的角色先认个错
@@ -1240,7 +1242,7 @@ function applyCharState(id, s) {
     clearTimeout(shakeEndTimer)
     react('work')
   } else {
-    show(s.pose)
+    show(s.pose, s.pose === 'asking' || previous?.pose === 'asking' || ev === 'SessionEnd')
   }
 }
 

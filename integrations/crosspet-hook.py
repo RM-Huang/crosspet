@@ -420,7 +420,7 @@ if character == "gpt":
 # 不是你让它干的活，演了就是「啥都没输入她就开工」，还常常一次开两个、直接进手忙脚乱。
 # 这种临时对话不存档：你自己开的对话从一开始就有会话记录文件（事件里的 transcript_path），它们没有。
 # 刚开的对话记录文件可能晚一点点才写出来：开头两个事件等一下再判断
-if character == "gpt" and "transcript_path" in event:
+if character == "gpt" and "transcript_path" in event and event.get("hook_event_name") != "SessionEnd":
     tp = str(event.get("transcript_path") or "")
     tries = 6 if event.get("hook_event_name") in ("SessionStart", "UserPromptSubmit") else 1
     for i in range(tries):
@@ -547,7 +547,7 @@ if character in MULTI_MODEL_HOSTS:
             log_issue("write_host", error)
 
 arg_event = sys.argv[2] if len(sys.argv) > 2 else ""
-name = event.get("hook_event_name") or arg_event
+source_name = event.get("hook_event_name") or arg_event
 
 
 # ---- 按轮次丢掉迟到的事件（Codex：事件带 turn_id；PR #26 @KQYaili 报的）----
@@ -581,7 +581,23 @@ def turn_gate(owner: str, sid: str, tid: str, name: str, child: bool) -> bool:
             book = {k: v for k, v in book.items() if isinstance(v, dict) and now - float(v.get("ts", 0)) < TURN_KEEP}
             rec = book.get(sid) or {"turn": "", "done": False, "finished": []}
             finished = rec.get("finished") or []
-            if child:
+            if name == "SessionEnd":
+                # 会话结束通常没有 turn_id；即使上一轮已经 Stop，也必须移除会话。
+                allow = not child
+                if allow:
+                    rec.update(closed=True, done=True)
+                    if rec.get("turn") and rec["turn"] not in finished:
+                        rec["finished"] = (finished + [rec["turn"]])[-20:]
+            elif name == "SessionStart" and not child:
+                allow = True
+                rec["closed"] = False
+            elif rec.get("closed") and not (name == "UserPromptSubmit" and not child and tid not in finished):
+                allow = False                 # 关闭后迟到的工具 / 子任务事件不能复活会话
+            elif not tid:
+                allow = True                  # 没有轮次标识的旧宿主保留原有行为
+                if name == "UserPromptSubmit":
+                    rec["closed"] = False
+            elif child:
                 allow = not rec.get("done")   # 主轮次已经结束：子任务迟到的事件
             elif tid in finished:
                 allow = False                 # 结束过的轮次
@@ -612,24 +628,7 @@ def turn_gate(owner: str, sid: str, tid: str, name: str, child: bool) -> bool:
 
 
 turn_id = str(event.get("turn_id") or "")
-turn_sid = str(event.get("session_id") or "")
-if turn_id and turn_sid:
-    is_child = bool(event.get("agent_id"))
-    try:
-        if not turn_gate(sys.argv[1] if len(sys.argv) > 1 else "claude", turn_sid, turn_id, name, is_child):
-            if arg_event:
-                print("{}")
-            sys.exit(0)
-    except SystemExit:
-        raise
-    except Exception as error:
-        log_issue("turn_gate", error)   # 记账出错：保留原有降级行为，同时留下原因
-    if is_child:
-        # 子任务的第一条消息不是你发的消息；子任务停下也不等于这一轮结束
-        if name == "UserPromptSubmit":
-            name = "SubagentStart"
-        elif name in TURN_END:
-            name = "SubagentStop"
+session_id = str(event.get("session_id") or event.get("sessionId") or event.get("conversationId") or "")
 call = event.get("toolCall") if isinstance(event.get("toolCall"), dict) else {}  # Antigravity
 tool = str(event.get("tool_name") or call.get("name", "")).lower()
 tool_input = json.dumps(event.get("tool_input") or call.get("args", ""), ensure_ascii=False).lower()
@@ -694,121 +693,67 @@ def tool_failed() -> bool:
     return False
 
 
+# 工具计数也按会话隔离，另一个聊天开始或结束时不能清空本轮计数。
 turn_file = state_dir / f"{character}-turn.json"
+SESSION_KEEP = 10 * 60
+SESSION_WORK = 3 * 60   # 与网页 sessionKind 的工作状态有效期一致
 
 
 def turn_tools() -> int:
     try:
-        return int(json.loads(turn_file.read_text()).get("tools", 0))
-    except Exception:
+        record = read_state_map(turn_file)
+        if session_id:
+            record = record.get("sessions", {}).get(session_id, {})
+        return int(record.get("tools", 0))
+    except Exception as error:
+        log_issue("read_turn_tools", error)
         return 0
 
 
 def set_turn_tools(n: int) -> None:
-    turn_file.write_text(json.dumps({"tools": n}))
-
-
-state_dir.mkdir(parents=True, exist_ok=True)
-
-pose = None
-if arg_event and name == "PostToolUse":
-    # Antigravity：不挂 PreToolUse（它要求钩子回答「放行 / 拦截」，会干扰正常的权限确认），
-    # 工具跑完时再按工具名显示动作，下一次调用模型（PreInvocation）时回到思考
-    agy = next((p for p, names in ANTIGRAVITY_TOOLS.items() if tool in names), None)
-    if tool_failed():
-        pose = "oops"
-    elif not tool or tool in ANTIGRAVITY_IGNORE:
-        pose = None
-    else:
-        set_turn_tools(turn_tools() + 1)
-        pose = agy or ("searching" if tool.startswith("browser") else pose_for_tool(tool))
-    name = "PreToolUse"  # 让桌宠当作「正在用这个工具」显示，而不是「工具结束、回去思考」
-elif name in ("PermissionRequest",):
-    pose = "asking"  # 等你授权（Codex）
-elif name in ("Notification",):
-    kind = str(event.get("notification_type", "")).lower()
-    message = str(event.get("message", "")).lower()
-    if kind in ASKING_NOTIFICATIONS or (not kind and "permission" in message):
-        pose = "asking"
-elif name in ("SessionStart",):
-    pose = "idle"
-elif name in ("UserPromptSubmit", "BeforeAgent"):
-    set_turn_tools(0)
-    pose = "listening"
-elif name in ("PreToolUse", "BeforeTool"):
-    set_turn_tools(turn_tools() + 1)
-    pose = pose_for_tool(tool)
-elif name in ("PostToolUse", "AfterTool"):
-    pose = "oops" if tool_failed() else "thinking"
-elif name in ("PostToolUseFailure",):
-    pose = "oops"
-elif name in ("Stop", "AfterAgent"):
-    if event.get("error"):  # Antigravity：出错停下
-        pose = "oops"
-    else:
-        pose = "proud" if turn_tools() >= BIG_JOB_TOOLS else "happy"
-    set_turn_tools(0)
-elif name in ("StopFailure",):
-    # 这一轮因为出错停下（接口报错、超限……；Claude Code、WorkBuddy）
-    pose = "oops"
-    name = "Stop"
-    set_turn_tools(0)
-elif name in ("Interrupt",):
-    # 被你打断（Codex 的 Interrupt）：吓一跳，然后回去待机；网页把 Stop + surprised 当成「被打断」
-    pose = "surprised"
-    name = "Stop"
-    set_turn_tools(0)
-elif name in ("PreCompact", "PreCompress"):
-    pose = "compact"  # 压缩上下文：把一大堆东西往小箱子里塞
-elif name in ("PostCompact",):
-    if str(event.get("trigger", "")).lower() == "manual":
-        # 手动 /compact：压完这一轮就结束了，后面不会再有 Stop
-        pose = "happy"
-        name = "Stop"
-        set_turn_tools(0)
-    else:
-        pose = "thinking"  # 自动压缩发生在一轮中途，压完接着干活
-elif name in ("SubagentStart",):
-    pose = "delegating"
-elif name in ("SubagentStop",):
-    pose = "thinking"
-elif name in ("BeforeModel", "PreInvocation"):
-    pose = "thinking"
-elif name in ("SessionEnd",):
-    pose = "sleeping"
-
-state = {"pose": pose, "event": name, "tool": tool, "ts": time.time()}
-if pose == "thinking" and name in ("PreInvocation", "PostToolUse", "AfterTool"):
-    # 快的工具（ls、读文件、grep）从开始到结束常常不到 0.3 秒，桌宠每 0.3 秒才读一次，
-    # 刚写的工具动作会被「回去思考」直接盖掉（Antigravity 甚至几毫秒内就开始下一轮思考）。
-    # 所以把它捎带上：桌宠先演完那个动作再进入思考；已经演过的（同一个 afterTs）桌宠会跳过。
     try:
-        prev = json.loads((state_dir / f"{character}-state.json").read_text())
-        if prev.get("event") == "PreToolUse" and time.time() - float(prev.get("ts", 0)) < 3:
-            state.update(after=prev.get("pose"), afterTs=prev.get("ts"), tool=prev.get("tool", ""))
-    except Exception:
-        pass
+        if not session_id:
+            write_state_json(turn_file, {"tools": n})
+            return
+        record = read_state_map(turn_file)
+        known = record.get("sessions", {})
+        known = known if isinstance(known, dict) else {}
+        now = time.time()
+        known = {k: v for k, v in known.items() if isinstance(v, dict) and valid_timestamp(v.get("ts"))
+                 and now - v["ts"] < SESSION_KEEP}
+        if n:
+            known[session_id] = {"tools": n, "ts": now}
+        else:
+            known.pop(session_id, None)
+        write_state_json(turn_file, {"sessions": known})
+    except Exception as error:
+        log_issue("write_turn_tools", error)
 
-if pose:
+
+def write_pose(state) -> None:
     try:
         write_state_json(state_dir / f"{character}-state.json", state)
     except Exception as error:
         log_issue("write_state", error)
 
 
-# 同一个 AI 同时开着好几个对话在干活：按会话另外记一份 <角色>-sessions.json（{会话id: {pose, event, ts}}），
-# 桌宠看到两个以上同时在干活时演「手忙脚乱」，每个对话一张小卡片。几个钩子可能同时写，用文件锁排队
-SESSION_KEEP = 10 * 60   # 多久没动静的会话不再记
+def session_active(entry, now: float) -> bool:
+    pose = entry["pose"]
+    if pose in ("idle", "sleeping", "happy", "proud"):
+        return False
+    if pose in ("oops", "surprised") and entry["event"] == "Stop":
+        return False
+    return now - entry["ts"] < (SESSION_KEEP if pose == "asking" else SESSION_WORK)
 
 
-def update_sessions(sid: str, entry) -> None:
+def update_sessions(sid: str, state) -> None:
+    """一次串行更新会话表和角色状态；优先等待授权，其次仍在工作的会话。"""
     path = state_dir / f"{character}-sessions.json"
     with state_lock(f".{character}-sessions.lock"):
         known = read_state_map(path)
         now = time.time()
         clean, discarded = {}, 0
         for key, value in known.items():
-            # 旧版并发写入可能混进模型字符串；一个坏项不能阻断其他会话更新。
             if not (isinstance(value, dict) and isinstance(value.get("pose"), str) and value["pose"]
                     and isinstance(value.get("event"), str) and valid_timestamp(value.get("ts"))):
                 discarded += 1
@@ -817,24 +762,141 @@ def update_sessions(sid: str, entry) -> None:
                 clean[key] = value
         if discarded:
             log_issue("session_entries_recovered", file=path.name, discarded=discarded)
-        if entry is None:
+        ended = state["event"] == "SessionEnd"
+        if ended:
             clean.pop(sid, None)
         else:
-            clean[sid] = entry
+            clean[sid] = state
         write_state_json(path, clean)
+        # 忽略从未接收过状态的后台会话结束通知，不打断当前角色的其他动作。
+        if ended and sid not in known:
+            return
+        active = [(key, value) for key, value in clean.items() if session_active(value, now)]
+        if active:
+            key, value = max(active, key=lambda item: (item[1]["pose"] == "asking", item[1]["ts"]))
+            state = {**value, "session_id": key}
+        write_pose(state)
 
 
-session_id = str(event.get("session_id") or event.get("sessionId") or event.get("conversationId") or "")
-if session_id and (pose or name == "SessionEnd"):
-    try:
-        update_sessions(session_id, None if name == "SessionEnd" else
-                        {"pose": state.get("after") or pose if pose == "thinking" else pose, "event": name, "ts": time.time()})
-    except Exception as error:
-        log_issue("update_sessions", error)
+def handle_state():
+    name = source_name
+    owner = sys.argv[1] if len(sys.argv) > 1 else "claude"
+    is_child = bool(event.get("agent_id"))
+    if session_id and (turn_id or owner == "gpt"):
+        try:
+            if not turn_gate(owner, session_id, turn_id, name, is_child):
+                return None
+        except Exception as error:
+            log_issue("turn_gate", error)
+        if is_child:
+            if name == "UserPromptSubmit":
+                name = "SubagentStart"
+            elif name in TURN_END:
+                name = "SubagentStop"
+
+    pose = None
+    if arg_event and name == "PostToolUse":
+        # Antigravity：不挂 PreToolUse（它要求钩子回答「放行 / 拦截」，会干扰正常的权限确认），
+        # 工具跑完时再按工具名显示动作，下一次调用模型（PreInvocation）时回到思考
+        agy = next((p for p, names in ANTIGRAVITY_TOOLS.items() if tool in names), None)
+        if tool_failed():
+            pose = "oops"
+        elif not tool or tool in ANTIGRAVITY_IGNORE:
+            pose = None
+        else:
+            set_turn_tools(turn_tools() + 1)
+            pose = agy or ("searching" if tool.startswith("browser") else pose_for_tool(tool))
+        name = "PreToolUse"  # 让桌宠当作「正在用这个工具」显示，而不是「工具结束、回去思考」
+    elif name in ("PermissionRequest",):
+        pose = "asking"  # 等你授权（Codex）
+    elif name in ("Notification",):
+        kind = str(event.get("notification_type", "")).lower()
+        message = str(event.get("message", "")).lower()
+        if kind in ASKING_NOTIFICATIONS or (not kind and "permission" in message):
+            pose = "asking"
+    elif name in ("SessionStart",):
+        pose = "idle"
+    elif name in ("UserPromptSubmit", "BeforeAgent"):
+        set_turn_tools(0)
+        pose = "listening"
+    elif name in ("PreToolUse", "BeforeTool"):
+        set_turn_tools(turn_tools() + 1)
+        pose = pose_for_tool(tool)
+    elif name in ("PostToolUse", "AfterTool"):
+        pose = "oops" if tool_failed() else "thinking"
+    elif name in ("PostToolUseFailure",):
+        pose = "oops"
+    elif name in ("Stop", "AfterAgent"):
+        if event.get("error"):  # Antigravity：出错停下
+            pose = "oops"
+        else:
+            pose = "proud" if turn_tools() >= BIG_JOB_TOOLS else "happy"
+        set_turn_tools(0)
+    elif name in ("StopFailure",):
+        # 这一轮因为出错停下（接口报错、超限……；Claude Code、WorkBuddy）
+        pose = "oops"
+        name = "Stop"
+        set_turn_tools(0)
+    elif name in ("Interrupt",):
+        # 被你打断（Codex 的 Interrupt）：吓一跳，然后回去待机；网页把 Stop + surprised 当成「被打断」
+        pose = "surprised"
+        name = "Stop"
+        set_turn_tools(0)
+    elif name in ("PreCompact", "PreCompress"):
+        pose = "compact"  # 压缩上下文：把一大堆东西往小箱子里塞
+    elif name in ("PostCompact",):
+        if str(event.get("trigger", "")).lower() == "manual":
+            # 手动 /compact：压完这一轮就结束了，后面不会再有 Stop
+            pose = "happy"
+            name = "Stop"
+            set_turn_tools(0)
+        else:
+            pose = "thinking"  # 自动压缩发生在一轮中途，压完接着干活
+    elif name in ("SubagentStart",):
+        pose = "delegating"
+    elif name in ("SubagentStop",):
+        pose = "thinking"
+    elif name in ("BeforeModel", "PreInvocation"):
+        pose = "thinking"
+    elif name in ("SessionEnd",):
+        set_turn_tools(0)
+        pose = "sleeping"
+
+    state = {"pose": pose, "event": name, "tool": tool, "ts": time.time(), "session_id": session_id}
+    if pose == "thinking" and name in ("PreInvocation", "PostToolUse", "AfterTool"):
+        # 快的工具（ls、读文件、grep）从开始到结束常常不到 0.3 秒，桌宠每 0.3 秒才读一次，
+        # 刚写的工具动作会被「回去思考」直接盖掉（Antigravity 甚至几毫秒内就开始下一轮思考）。
+        # 所以把它捎带上：桌宠先演完那个动作再进入思考；已经演过的（同一个 afterTs）桌宠会跳过。
+        try:
+            prev = json.loads((state_dir / f"{character}-state.json").read_text())
+            if prev.get("session_id", "") == session_id and prev.get("event") == "PreToolUse" and time.time() - float(prev.get("ts", 0)) < 3:
+                state.update(after=prev.get("pose"), afterTs=prev.get("ts"), tool=prev.get("tool", ""))
+        except Exception:
+            pass
+
+    if pose:
+        if session_id:
+            try:
+                update_sessions(session_id, state)
+            except Exception as error:
+                log_issue("update_sessions", error)
+                write_pose(state)
+        else:
+            write_pose(state)
+    return name
 
 
-if name in LAUNCH_EVENTS:
-    ensure_pet_logged(f"{character} {name}")
+state_dir.mkdir(parents=True, exist_ok=True)
+try:
+    # 从轮次检查到状态发布一起串行，避免已通过检查的旧事件在 SessionEnd 后才落盘。
+    with state_lock(f".{character}-events.lock"):
+        handled_name = handle_state()
+except Exception as error:
+    log_issue("handle_event", error)
+    handled_name = None
+
+if handled_name in LAUNCH_EVENTS:
+    ensure_pet_logged(f"{character} {handled_name}")
 
 if arg_event:
     print("{}")
