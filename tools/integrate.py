@@ -1102,6 +1102,11 @@ def diagnose() -> str:
         except Exception:
             states.append(f"{f.name[:-11]}=读不了")
     L.append(f"[状态] {'；'.join(states) or '状态目录里没有状态文件'}")
+    errors = STATE_DIR / "hook-errors.jsonl"
+    try:
+        L.append(f"[钩子诊断] {short(errors)}（{ago(errors.stat().st_mtime)}）；上一份日志为 hook-errors.jsonl.1")
+    except FileNotFoundError:
+        pass
     hosts = []
     for f in sorted(STATE_DIR.glob("*-host.json")):
         try:

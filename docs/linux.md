@@ -92,6 +92,7 @@ Codex CLI 必须在桌宠的 PATH 中。应用菜单启动时若找不到 npm / 
 | 网页、角色、钩子、启动配置、日志 | `~/.local/share/crosspet/` |
 | 设置 / 应用映射 | `~/.config/crosspet/settings.json`、`apps.json` |
 | AI 状态、心跳 | `/tmp/crosspet/`，沿用现有接入协议 |
+| Hook 异常与恢复记录 | `/tmp/crosspet/hook-errors.jsonl`，上一份为 `hook-errors.jsonl.1` |
 | 登录自启动 | `~/.config/autostart/crosspet.desktop` |
 
 支持 `XDG_DATA_HOME`、`XDG_CONFIG_HOME` 和 `CROSSPET_DATA_DIR`、`CROSSPET_CONFIG_DIR`、`CROSSPET_STATE_DIR`。
@@ -99,12 +100,14 @@ Codex CLI 必须在桌宠的 PATH 中。应用菜单启动时若找不到 npm / 
 
 源码更新后重新运行 `./install.sh`；已安装的旧进程会先正常退出。`./update.sh` 会先快进拉取仓库，再重新安装。卸载用 `./uninstall.sh`：撤销检测到的 AI 接入、删除程序和启动入口，保留用户角色及设置。
 
+安装和启动时通过临时文件原子替换 Hook，避免 Codex 恰好读到复制了一半的脚本。会话表中的无效条目会在下一条事件到来时自动清除，有效且未过期的会话继续保留；坏 JSON 或非字典文件会重建。恢复和同步异常写入上述 JSONL 日志，包含处理阶段、事件 / 会话 / 轮次标识及错误原因，不记录提示词或工具参数。日志达到约 1 MiB 后轮转，保留当前和上一份；没有异常时不写日志。`tools/integrate.py diagnose` 会显示日志位置。
+
 ## 验证
 
 不依赖桌面的回归：
 
 ```bash
-python3 -m unittest tests.linux_test tests.integrate_test tests.hook_stdin_test tests.hook_test tests.codex_turn_test
+python3 -m unittest tests.linux_test tests.integrate_test tests.hook_stdin_test tests.hook_test tests.codex_turn_test tests.hook_state_test
 node --test tests/*.test.js tests/*.test.mjs
 ```
 

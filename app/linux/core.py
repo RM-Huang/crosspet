@@ -54,6 +54,18 @@ def write_json(path, data):
     tmp.replace(path)
 
 
+def copy_atomic(source, target):
+    """完整复制后再替换，正在启动的 Hook 不会读到复制了一半的脚本。"""
+    target = Path(target)
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        shutil.copy2(source, tmp)
+        tmp.replace(target)
+    finally:
+        with suppress(OSError):
+            tmp.unlink(missing_ok=True)
+
+
 def data_path():
     return Path(os.environ.get("CROSSPET_DATA_DIR") or
                 str(Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "crosspet")).resolve()
@@ -93,7 +105,7 @@ class Store:
         for name in ("web", "characters"):
             shutil.copytree(ROOT / ("app/web" if name == "web" else name), self.data / name,
                             dirs_exist_ok=True, ignore=shutil.ignore_patterns("raw", "__pycache__"))
-        shutil.copy2(ROOT / "integrations/crosspet-hook.py", self.data / "crosspet-hook.py")
+        copy_atomic(ROOT / "integrations/crosspet-hook.py", self.data / "crosspet-hook.py")
         write_json(self.data / "launch.json", {"argv": ["/usr/bin/python3", str(ROOT / "app/linux/main.py")]})
 
     def save(self):

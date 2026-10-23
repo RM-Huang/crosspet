@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 
-from core import ROOT, desktop_entry, write_json
+from core import ROOT, copy_atomic, desktop_entry, write_json
 
 
 def install(prefix):
@@ -51,7 +51,7 @@ def install(prefix):
         launcher.chmod(0o755)
         desktop.parent.mkdir(parents=True, exist_ok=True)
         desktop.write_text(desktop_entry([str(launcher)]).replace(str(ROOT / "app/icon"), str(runtime / "app/icon")))
-        shutil.copy2(ROOT / "integrations/crosspet-hook.py", data / "crosspet-hook.py")
+        copy_atomic(ROOT / "integrations/crosspet-hook.py", data / "crosspet-hook.py")
         write_json(data / "launch.json", {"argv": [str(launcher)]})
     print(f"已安装：{launcher}\n应用菜单：CrossPet\nAI 接入：启动后右键 → 设置 → 接入 AI")
     return launcher

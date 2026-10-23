@@ -15,9 +15,11 @@
 用 /tmp 是因为有的 AI（比如 DeepSeek Harness）的钩子跑在沙箱里，只允许写 /tmp。
 """
 import json
+import math
 import os
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 BIG_JOB_TOOLS = 8  # 一轮里用了这么多次工具，结束时「得意」一下
@@ -31,6 +33,93 @@ if sys.platform == "linux":
 # Linux 用 XDG_DATA_HOME（默认 ~/.local/share），macOS 用 Application Support。
 app_data = default_data if (os.name == "nt" or sys.platform == "linux" or os.environ.get("CROSSPET_DATA_DIR")) else Path.home() / "Library/Application Support/CrossPet"
 state_dir = Path(os.environ.get("CROSSPET_STATE_DIR") or (str(default_data / "state") if os.name == "nt" else "/tmp/crosspet"))
+
+
+@contextmanager
+def state_lock(name: str):
+    """跨进程锁住整个读改写过程；加锁失败时交给调用方记录，不继续覆盖共享文件。"""
+    with (state_dir / name).open("a+b") as lock:
+        if os.name == "nt":
+            import msvcrt
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def log_issue(stage: str, error=None, **details) -> None:
+    """只记状态同步所需的标识和异常，不记录提示词、工具参数或对话正文。"""
+    source = globals().get("event")
+    source = source if isinstance(source, dict) else {}
+    record = {"ts": time.time(), "pid": os.getpid(), "host": sys.argv[1] if len(sys.argv) > 1 else "claude",
+              "stage": stage, **details}
+    for key in ("hook_event_name", "session_id", "turn_id"):
+        if source.get(key):
+            record[key] = str(source[key])[:160]
+    if error is not None:
+        record.update(error=type(error).__name__, message=str(error)[:400])
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        path = state_dir / "hook-errors.jsonl"
+        # 只保留当前和上一份各约 1 MiB；轮转、追加也串行，避免并发日志互相覆盖。
+        with state_lock(".hook-errors.lock"):
+            raw = line.encode("utf-8")
+            if path.exists() and path.stat().st_size + len(raw) > 1 << 20:
+                path.replace(state_dir / "hook-errors.jsonl.1")
+            with path.open("ab") as log:
+                log.write(raw)
+    except Exception:
+        # 状态目录不可写时仍留诊断，但不向 stdout 输出，避免改变宿主的 Hook 协议。
+        try:
+            sys.stderr.write(line)
+        except Exception:
+            pass
+
+
+def read_state_map(path: Path) -> dict:
+    """空缺文件正常初始化；坏 JSON / 非字典可恢复，其他 I/O 错误不冒充空表。"""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        return {}
+    except (ValueError, UnicodeError) as error:
+        log_issue("state_file_recovered", error, file=path.name)
+        return {}
+    if not isinstance(value, dict):
+        log_issue("state_file_recovered", file=path.name, invalid_type=type(value).__name__)
+        return {}
+    return value
+
+
+def write_state_json(path: Path, value) -> None:
+    """临时文件同时区分目标文件和进程，读者只能看到完整的新旧快照。"""
+    tmp = path.with_name(f".{path.stem}.{os.getpid()}.json")
+    try:
+        tmp.write_text(json.dumps(value), encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def valid_timestamp(value) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value) and value > 0
+    except OverflowError:
+        return False
+
 
 # 跟着 AI 出现：开始干活（会话开始 / 发消息 / 调模型）时桌宠没开着就把它打开。
 # 用户从菜单手动退出过（user-quit）就先不管，直到这个 AI 程序关掉重开、或者重启电脑：
@@ -301,7 +390,8 @@ def read_event():
 
 try:
     event = read_event()
-except Exception:
+except Exception as error:
+    log_issue("read_event", error)
     event = None
 if not isinstance(event, dict):
     sys.exit(0)
@@ -381,37 +471,19 @@ def remember_session_model(host: str, fallback: str = "") -> str:
     # 模型得另记一个文件：不然记模型会把会话状态当模型名读回来（character_for_model 收到 dict 直接崩）
     path = state_dir / (f"{host}-models.json" if host in NAMED_HOSTS else f"{host}-sessions.json")
     model = str(event.get("model") or "")
-    if model and sid:
-        try:
-            state_dir.mkdir(parents=True, exist_ok=True)
-            # 同一宿主的几个会话会同时启动：锁住「读旧表 → 加新项 → 替换」整段。
-            # 临时文件也按目标文件命名，不能与 update_sessions 的 .qwen-sessions.json 抢同一路径。
-            with open(state_dir / f".{host}-models.lock", "a+b") as lock:
-                if os.name == "nt":
-                    import msvcrt
-                    msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(lock, fcntl.LOCK_EX)
-                try:
-                    try:
-                        known = json.loads(path.read_text())
-                    except Exception:
-                        known = {}
-                    known[sid] = model
-                    known = dict(list(known.items())[-50:])  # 只留最近的会话
-                    tmp = state_dir / f".{path.stem}.{os.getpid()}.json"
-                    tmp.write_text(json.dumps(known))
-                    tmp.replace(path)
-                finally:
-                    if os.name == "nt":
-                        lock.seek(0)
-                        msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
-        except Exception:
-            pass
     try:
-        known = json.loads(path.read_text())
-    except Exception:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        with state_lock(f".{host}-models.lock"):
+            known = read_state_map(path)
+            clean = {k: v for k, v in known.items() if isinstance(v, str) and v}
+            if len(clean) != len(known):
+                log_issue("model_entries_recovered", file=path.name, discarded=len(known) - len(clean))
+            if model and sid:
+                clean[sid] = model
+            known = dict(list(clean.items())[-50:])  # 只留最近的会话
+            write_state_json(path, known)
+    except Exception as error:
+        log_issue("remember_session_model", error, file=path.name)
         known = {}
     return model or known.get(sid, "") or fallback or HOST_DEFAULT_MODEL.get(host, "")
 
@@ -454,11 +526,9 @@ if character in SELF_HOSTS:
     event["model"] = model
     try:
         state_dir.mkdir(parents=True, exist_ok=True)
-        hp = state_dir / f".{host}-host.json"
-        hp.write_text(json.dumps({"character": mapped, "model": model, "ts": time.time()}))
-        hp.replace(state_dir / f"{host}-host.json")
-    except Exception:
-        pass
+        write_state_json(state_dir / f"{host}-host.json", {"character": mapped, "model": model, "ts": time.time()})
+    except Exception as error:
+        log_issue("write_host", error)
 
 if character in MULTI_MODEL_HOSTS:
     host = character
@@ -472,11 +542,9 @@ if character in MULTI_MODEL_HOSTS:
     if model:
         try:
             state_dir.mkdir(parents=True, exist_ok=True)
-            hp = state_dir / f".{host}-host.json"
-            hp.write_text(json.dumps({"character": mapped, "model": str(event.get("model")), "ts": time.time()}))
-            hp.replace(state_dir / f"{host}-host.json")
-        except Exception:
-            pass
+            write_state_json(state_dir / f"{host}-host.json", {"character": mapped, "model": model, "ts": time.time()})
+        except Exception as error:
+            log_issue("write_host", error)
 
 arg_event = sys.argv[2] if len(sys.argv) > 2 else ""
 name = event.get("hook_event_name") or arg_event
@@ -554,8 +622,8 @@ if turn_id and turn_sid:
             sys.exit(0)
     except SystemExit:
         raise
-    except Exception:
-        pass   # 记账出错：照旧演，不能因为这个不动
+    except Exception as error:
+        log_issue("turn_gate", error)   # 记账出错：保留原有降级行为，同时留下原因
     if is_child:
         # 子任务的第一条消息不是你发的消息；子任务停下也不等于这一轮结束
         if name == "UserPromptSubmit":
@@ -722,10 +790,10 @@ if pose == "thinking" and name in ("PreInvocation", "PostToolUse", "AfterTool"):
         pass
 
 if pose:
-    # 临时文件名带进程号：同一个角色的几个钩子同时写（好几个对话一起干活）时不会抢同一个临时文件
-    tmp = state_dir / f".{character}-state.{os.getpid()}.json"
-    tmp.write_text(json.dumps(state))
-    tmp.replace(state_dir / f"{character}-state.json")
+    try:
+        write_state_json(state_dir / f"{character}-state.json", state)
+    except Exception as error:
+        log_issue("write_state", error)
 
 
 # 同一个 AI 同时开着好几个对话在干活：按会话另外记一份 <角色>-sessions.json（{会话id: {pose, event, ts}}），
@@ -735,35 +803,25 @@ SESSION_KEEP = 10 * 60   # 多久没动静的会话不再记
 
 def update_sessions(sid: str, entry) -> None:
     path = state_dir / f"{character}-sessions.json"
-    with open(state_dir / f".{character}-sessions.lock", "a+") as lock:
-        try:
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(lock, fcntl.LOCK_EX)
-        except Exception:
-            pass
-        try:
-            known = json.loads(path.read_text())
-        except Exception:
-            known = {}
+    with state_lock(f".{character}-sessions.lock"):
+        known = read_state_map(path)
         now = time.time()
+        clean, discarded = {}, 0
+        for key, value in known.items():
+            # 旧版并发写入可能混进模型字符串；一个坏项不能阻断其他会话更新。
+            if not (isinstance(value, dict) and isinstance(value.get("pose"), str) and value["pose"]
+                    and isinstance(value.get("event"), str) and valid_timestamp(value.get("ts"))):
+                discarded += 1
+                continue
+            if now - value["ts"] < SESSION_KEEP:
+                clean[key] = value
+        if discarded:
+            log_issue("session_entries_recovered", file=path.name, discarded=discarded)
         if entry is None:
-            known.pop(sid, None)
+            clean.pop(sid, None)
         else:
-            known[sid] = entry
-        known = {k: v for k, v in known.items() if now - float(v.get("ts", 0)) < SESSION_KEEP}
-        tmp = state_dir / f".{character}-sessions.json"
-        tmp.write_text(json.dumps(known))
-        tmp.replace(path)
-        if os.name == "nt":
-            try:
-                lock.seek(0)
-                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
-            except Exception:
-                pass
+            clean[sid] = entry
+        write_state_json(path, clean)
 
 
 session_id = str(event.get("session_id") or event.get("sessionId") or event.get("conversationId") or "")
@@ -771,8 +829,8 @@ if session_id and (pose or name == "SessionEnd"):
     try:
         update_sessions(session_id, None if name == "SessionEnd" else
                         {"pose": state.get("after") or pose if pose == "thinking" else pose, "event": name, "ts": time.time()})
-    except Exception:
-        pass
+    except Exception as error:
+        log_issue("update_sessions", error)
 
 
 if name in LAUNCH_EVENTS:

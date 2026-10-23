@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app/linux"))
-from core import Store, desktop_entry, query_codex, read_json, write_json
+from core import Store, copy_atomic, desktop_entry, query_codex, read_json, write_json
 from main import Pet
 spec = importlib.util.spec_from_file_location("linux_integrate", ROOT / "tools/integrate.py")
 integrate = importlib.util.module_from_spec(spec)
@@ -101,6 +101,20 @@ class LinuxTests(unittest.TestCase):
         self.assertEqual(Store().settings["size"], 1.3)
         self.assertEqual((custom / "character.json").read_text(), '{"name":"keep"}')
         self.assertEqual(read_json(self.store.data / "launch.json")["argv"], [str(launcher)])
+        source = (ROOT / "integrations/crosspet-hook.py").read_bytes()
+        self.assertEqual((self.store.data / "crosspet-hook.py").read_bytes(), source)
+        self.assertEqual((self.store.data / "runtime/integrations/crosspet-hook.py").read_bytes(), source)
+
+    def test_interrupted_hook_copy_keeps_installed_script(self):
+        target = self.store.data / "crosspet-hook.py"
+        target.write_text("previous complete script")
+        def interrupted(source, tmp):
+            Path(tmp).write_text("partial new script")
+            raise OSError("copy interrupted")
+        with patch("core.shutil.copy2", side_effect=interrupted), self.assertRaises(OSError):
+            copy_atomic(ROOT / "integrations/crosspet-hook.py", target)
+        self.assertEqual(target.read_text(), "previous complete script")
+        self.assertEqual(list(self.store.data.glob(".crosspet-hook.py.*.tmp")), [])
 
     def test_linux_autostart_off_is_honored(self):
         (self.store.data / "ai-autostart-off").write_text("1")
